@@ -57,6 +57,19 @@ func (r *Rest) MountEndpoint() {
 	transactions.GET("", r.ListTransactions)
 	transactions.GET("/members", r.SearchTransactionMembers)
 	transactions.POST("/savings", r.CreateSavingsTransaction)
+
+	members := baseURL.Group("/members")
+	members.Use(r.middleware.AuthenticateUser())
+	members.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
+	members.GET("", r.ListMembers)
+	members.POST("", r.CreateMember)
+
+	reports := baseURL.Group("/reports")
+	reports.Use(r.middleware.AuthenticateUser())
+	reports.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
+	reports.GET("/financial", r.GetFinancialReport)
+	reports.GET("/financial/export", r.ExportFinancialReportXLSX)
+
 }
 
 func (r *Rest) Run() {

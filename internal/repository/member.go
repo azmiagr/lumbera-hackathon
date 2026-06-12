@@ -12,6 +12,9 @@ import (
 type IMemberRepository interface {
 	GetActiveMember(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*entity.Member, error)
 	SearchTransactionMembers(tx *gorm.DB, req model.SearchTransactionMembersRequest) ([]model.TransactionMemberResponse, error)
+	ListMembers(tx *gorm.DB, req model.ListMembersRequest) ([]model.MemberListItemResponse, int64, error)
+	CountMembersByCooperative(tx *gorm.DB, cooperativeID uuid.UUID) (int64, error)
+	CreateMember(tx *gorm.DB, member *entity.Member) error
 }
 
 type MemberRepository struct {
@@ -78,4 +81,95 @@ func (r *MemberRepository) SearchTransactionMembers(tx *gorm.DB, req model.Searc
 	}
 
 	return members, nil
+}
+
+func (r *MemberRepository) ListMembers(tx *gorm.DB, req model.ListMembersRequest) ([]model.MemberListItemResponse, int64, error) {
+	var members []model.MemberListItemResponse
+	var total int64
+
+	limit := req.Limit
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+
+	page := req.Page
+	if page <= 0 {
+		page = 1
+	}
+
+	query := tx.Debug().
+		Table("members").
+		Select(`
+			members.member_id,
+			members.user_id,
+			members.cooperative_id,
+			users.full_name,
+			members.member_number,
+			members.joined_date,
+			members.member_status,
+			members.current_m_csscore,
+			members.mcs_grade
+		`).
+		Joins("JOIN users ON users.user_id = members.user_id").
+		Where("members.cooperative_id = ?", req.CooperativeID).
+		Where("users.status = ?", "ACTIVE")
+
+	status := strings.ToUpper(strings.TrimSpace(req.Status))
+	if status == "" {
+		status = "ACTIVE"
+	}
+	query = query.Where("members.member_status = ?", status)
+
+	grade := strings.ToUpper(strings.TrimSpace(req.Grade))
+	if grade != "" && grade != "SEMUA" {
+		query = query.Where("members.mcs_grade = ?", grade)
+	}
+
+	search := strings.TrimSpace(req.Search)
+	if search != "" {
+		keyword := "%" + search + "%"
+		query = query.Where(
+			"(users.full_name LIKE ? OR members.member_number LIKE ?)",
+			keyword,
+			keyword,
+		)
+	}
+
+	countQuery := query.Session(&gorm.Session{})
+	if err := countQuery.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	err := query.
+		Order("users.full_name ASC").
+		Offset((page - 1) * limit).
+		Limit(limit).
+		Scan(&members).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return members, total, nil
+}
+
+func (r *MemberRepository) CreateMember(tx *gorm.DB, member *entity.Member) error {
+	err := tx.Debug().Create(member).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *MemberRepository) CountMembersByCooperative(tx *gorm.DB, cooperativeID uuid.UUID) (int64, error) {
+	var total int64
+	err := tx.Debug().
+		Model(&entity.Member{}).
+		Where("cooperative_id = ?", cooperativeID).
+		Count(&total).Error
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
 }
