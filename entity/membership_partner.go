@@ -13,6 +13,7 @@ type UserCooperativeMembership struct {
 	CooperativeID           uuid.UUID  `json:"cooperative_id" gorm:"type:varchar(36);not null;index"`
 	MemberID                *uuid.UUID `json:"member_id" gorm:"type:varchar(36);index"`
 	RoleID                  uuid.UUID  `json:"role_id" gorm:"type:varchar(36);not null;index"`
+	PositionCode            string     `json:"position_code" gorm:"type:enum('CHAIRMAN','TREASURER','SECRETARY','STAFF')"`
 	OfficerCode             string     `json:"officer_code" gorm:"type:varchar(50)"`
 	Status                  string     `json:"status" gorm:"type:enum('ACTIVE','INACTIVE','SUSPENDED');default:'ACTIVE'"`
 	JoinedAt                time.Time  `json:"joined_at" gorm:"autoCreateTime"`

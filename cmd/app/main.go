@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+
 	"github.com/azmiagr/lumbera-hackathon/internal/handler/rest"
 	"github.com/azmiagr/lumbera-hackathon/internal/repository"
 	"github.com/azmiagr/lumbera-hackathon/internal/service"
@@ -9,7 +11,8 @@ import (
 	"github.com/azmiagr/lumbera-hackathon/pkg/database/mariadb"
 	"github.com/azmiagr/lumbera-hackathon/pkg/jwt"
 	"github.com/azmiagr/lumbera-hackathon/pkg/middleware"
-	"log"
+	"github.com/azmiagr/lumbera-hackathon/pkg/supabase"
+	"github.com/azmiagr/lumbera-hackathon/pkg/whatsapp"
 )
 
 func main() {
@@ -28,7 +31,9 @@ func main() {
 	repo := repository.NewRepository(db)
 	bcrypt := bcrypt.Init()
 	jwt := jwt.Init()
-	svc := service.NewService(repo, bcrypt, jwt)
+	whatsapp := whatsapp.Init()
+	supabase := supabase.Init()
+	svc := service.NewService(repo, bcrypt, jwt, whatsapp, supabase)
 
 	middleware := middleware.Init(svc, jwt)
 	r := rest.NewRest(svc, middleware)

@@ -3,9 +3,11 @@ package middleware
 import (
 	"github.com/azmiagr/lumbera-hackathon/internal/service"
 	"github.com/azmiagr/lumbera-hackathon/pkg/jwt"
+	"github.com/gin-gonic/gin"
 )
 
 type Interface interface {
+	Cors() gin.HandlerFunc
 }
 
 type middleware struct {

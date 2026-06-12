@@ -11,6 +11,7 @@ import (
 )
 
 type Interface interface {
+	GenerateAccessToken(input GenerateAccessTokenInput) (string, error)
 }
 
 type jsonWebToken struct {
@@ -19,10 +20,16 @@ type jsonWebToken struct {
 }
 
 type Claims struct {
-	UserID   uuid.UUID
-	IsAdmin  bool
-	RoleName string
+	UserID        uuid.UUID `json:"user_id"`
+	CooperativeID uuid.UUID `json:"cooperative_id"`
+	RoleCode      string    `json:"role_code"`
 	jwt.RegisteredClaims
+}
+
+type GenerateAccessTokenInput struct {
+	UserID        uuid.UUID
+	CooperativeID uuid.UUID
+	RoleCode      string
 }
 
 func Init() Interface {
@@ -36,4 +43,21 @@ func Init() Interface {
 		SecretKey:   secretKey,
 		ExpiredTime: time.Duration(expiredTime) * time.Hour,
 	}
+}
+
+func (j *jsonWebToken) GenerateAccessToken(input GenerateAccessTokenInput) (string, error) {
+	now := time.Now()
+
+	claims := Claims{
+		UserID:        input.UserID,
+		CooperativeID: input.CooperativeID,
+		RoleCode:      input.RoleCode,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(j.ExpiredTime)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(j.SecretKey))
 }
