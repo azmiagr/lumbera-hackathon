@@ -21,4 +21,6 @@ type Transaction struct {
 	IsOfflineCreated    bool       `json:"is_offline_created" gorm:"default:false"`
 	ClientTransactionID string     `json:"client_transaction_id" gorm:"type:varchar(100);uniqueIndex:idx_coop_client_transaction"`
 	CreatedAt           time.Time  `json:"created_at" gorm:"autoCreateTime"`
+
+	JournalEntries []JournalEntry `json:"journal_entries" gorm:"foreignKey:TransactionID;constraint:onDelete:CASCADE"`
 }

@@ -15,6 +15,8 @@ type Service struct {
 	MemberActivationService    IMemberActivationService
 	AuthService                IAuthService
 	TransactionService         ITransactionService
+	MemberService              IMemberService
+	ReportService              IReportService
 }
 
 type serviceDependency struct {
@@ -41,5 +43,7 @@ func NewService(repository *repository.Repository, bcrypt bcrypt.Interface, jwtA
 		MemberActivationService:    NewMemberActivationService(deps),
 		AuthService:                NewAuthService(deps),
 		TransactionService:         NewTransactionService(deps),
+		MemberService:              NewMemberService(deps),
+		ReportService:              NewReportService(deps),
 	}
 }
