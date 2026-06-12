@@ -627,11 +627,17 @@ func (s *OfficerRegistrationService) ActivateOnboardingDraft(req model.ActivateO
 	}
 
 	cooperativeID := uuid.New()
+	cooperativeCode, err := s.generateUniqueCooperativeCode(tx, draft.CooperativeName)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal membuat kode koperasi")
+	}
+
 	cooperative := &entity.Cooperative{
 		CooperativeID:         cooperativeID,
 		Name:                  draft.CooperativeName,
 		CooperativeType:       draft.CooperativeType,
 		RegistrationNumber:    draft.RegistrationNumber,
+		CooperativeCode:       cooperativeCode,
 		EstablishedYear:       draft.EstablishedYear,
 		Status:                "ACTIVE",
 		Address:               draft.Address,
@@ -1009,6 +1015,69 @@ func (s *OfficerRegistrationService) validateDraftReadyForActivation(tx *gorm.DB
 	}
 
 	return nil
+}
+
+func (s *OfficerRegistrationService) generateUniqueCooperativeCode(tx *gorm.DB, cooperativeName string) (string, error) {
+	baseCode := buildCooperativeCodeBase(cooperativeName)
+	for attempt := 1; attempt <= 99; attempt++ {
+		candidate := baseCode
+		if attempt > 1 {
+			suffix := fmt.Sprintf("-%02d", attempt)
+			candidate = truncateCooperativeCode(baseCode, len(suffix)) + suffix
+		}
+
+		_, err := s.deps.repository.CooperativeRepository.GetCooperative(tx, model.GetCooperativeParam{
+			CooperativeCode: candidate,
+		})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return candidate, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return truncateCooperativeCode(baseCode, 9) + "-" + uuid.NewString()[:8], nil
+}
+
+func buildCooperativeCodeBase(cooperativeName string) string {
+	normalizedName := strings.ToUpper(strings.TrimSpace(cooperativeName))
+	var builder strings.Builder
+	previousDash := false
+
+	for _, char := range normalizedName {
+		isAlphaNumeric := (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9')
+		if isAlphaNumeric {
+			builder.WriteRune(char)
+			previousDash = false
+			continue
+		}
+
+		if builder.Len() > 0 && !previousDash {
+			builder.WriteRune('-')
+			previousDash = true
+		}
+	}
+
+	code := strings.Trim(builder.String(), "-")
+	if code == "" {
+		code = "KOPERASI"
+	}
+
+	return truncateCooperativeCode(code, 0)
+}
+
+func truncateCooperativeCode(code string, reservedLength int) string {
+	maxLength := 50 - reservedLength
+	if maxLength < 1 {
+		maxLength = 1
+	}
+
+	if len(code) <= maxLength {
+		return strings.Trim(code, "-")
+	}
+
+	return strings.Trim(code[:maxLength], "-")
 }
 
 func generateNumericOTP(length int) (string, error) {

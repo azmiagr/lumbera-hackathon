@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/azmiagr/lumbera-hackathon/internal/service"
+	constants "github.com/azmiagr/lumbera-hackathon/pkg/constant"
 	"github.com/azmiagr/lumbera-hackathon/pkg/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,13 @@ func (r *Rest) MountEndpoint() {
 	auth.POST("forgot-pin/request-otp", r.RequestForgotPINOTP)
 	auth.POST("forgot-pin/verify-otp", r.VerifyForgotPINOTP)
 	auth.POST("forgot-pin/set-pin", r.SetForgottenPIN)
+
+	transactions := baseURL.Group("/transactions")
+	transactions.Use(r.middleware.AuthenticateUser())
+	transactions.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
+	transactions.GET("", r.ListTransactions)
+	transactions.GET("/members", r.SearchTransactionMembers)
+	transactions.POST("/savings", r.CreateSavingsTransaction)
 }
 
 func (r *Rest) Run() {

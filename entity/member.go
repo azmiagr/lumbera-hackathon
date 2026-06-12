@@ -21,5 +21,6 @@ type Member struct {
 	UpdatedAt          time.Time      `json:"updated_at" gorm:"autoUpdateTime"`
 	DeletedAt          gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 
+	Transactions               []Transaction               `json:"transactions" gorm:"foreignKey:MemberID;constraint:onDelete:CASCADE"`
 	UserCooperativeMemberships []UserCooperativeMembership `json:"user_cooperative_memberships" gorm:"foreignKey:MemberID;constraint:onDelete:CASCADE"`
 }

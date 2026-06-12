@@ -9,7 +9,6 @@ type Cooperative struct {
 	RegistrationNumber    string    `json:"registration_number" gorm:"type:varchar(50);uniqueIndex;not null"`
 	CooperativeCode       string    `json:"cooperative_code" gorm:"type:varchar(50);uniqueIndex"`
 	EstablishedYear       int       `json:"established_year" gorm:"type:int;not null"`
-	TaxNumber             string    `json:"tax_number" gorm:"type:varchar(50);uniqueIndex"`
 	Status                string    `json:"status" gorm:"type:enum('ACTIVE','SUSPENDED','INACTIVE');default:'ACTIVE'"`
 	Address               string    `json:"address" gorm:"type:text;not null"`
 	BankName              string    `json:"bank_name" gorm:"type:varchar(100)"`
@@ -19,4 +18,5 @@ type Cooperative struct {
 	FinancialConfiguration     *FinancialConfiguration     `json:"financial_configuration" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 	UserCooperativeMemberships []UserCooperativeMembership `json:"user_cooperative_memberships" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 	Members                    []Member                    `json:"members" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
+	Transactions               []Transaction               `json:"transactions" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 }

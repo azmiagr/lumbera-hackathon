@@ -11,7 +11,7 @@ import (
 
 func (m *middleware) Cors() gin.HandlerFunc {
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
-	origins := []string{"http://localhost:5173"}
+	origins := []string{"http://localhost:3000"}
 
 	if allowedOrigins != "" {
 		origins = splitAndTrim(allowedOrigins)
