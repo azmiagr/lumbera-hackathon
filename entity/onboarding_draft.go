@@ -18,6 +18,7 @@ type OnboardingDraft struct {
 	FullName                    string         `json:"full_name" gorm:"type:varchar(255)"`
 	NIKEncrypted                string         `json:"-" gorm:"type:varchar(255)"`
 	NIKHash                     string         `json:"nik_hash" gorm:"type:varchar(255);index"`
+	NIKMasked                   string         `json:"nik_masked" gorm:"type:varchar(32)"`
 	RoleCode                    string         `json:"role_code" gorm:"type:varchar(100)"`
 	PositionCode                string         `json:"position_code" gorm:"type:varchar(50)"`
 	ExistingCooperativeCode     string         `json:"existing_cooperative_code" gorm:"type:varchar(50)"`

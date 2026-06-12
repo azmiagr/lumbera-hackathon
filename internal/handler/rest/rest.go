@@ -33,6 +33,7 @@ func (r *Rest) MountEndpoint() {
 	onboarding.POST("officer/verify-otp", r.VerifyOfficerRegistrationOTP)
 	onboarding.POST("officer/set-pin", r.SetOfficerRegistrationPIN)
 
+	onboarding.GET("drafts/:draftID/state", r.GetOnboardingState)
 	onboarding.PATCH("drafts/:draftID/personal-data", r.UpdateOnboardingPersonalData)
 	onboarding.PATCH("drafts/:draftID/cooperative-type", r.UpdateOnboardingCooperativeType)
 	onboarding.PATCH("drafts/:draftID/cooperative-profile", r.UpdateOnboardingCooperativeProfile)
@@ -40,6 +41,11 @@ func (r *Rest) MountEndpoint() {
 	onboarding.PATCH("drafts/:draftID/bank-account", r.UpdateOnboardingCooperativeBankAccount)
 	onboarding.POST("drafts/:draftID/activate", r.ActivateOnboardingDraft)
 
+	onboarding.POST("member/check-phone", r.CheckMemberPhone)
+	onboarding.POST("member/set-pin", r.SetMemberPIN)
+
+	auth := baseURL.Group("/auth")
+	auth.POST("login", r.Login)
 }
 
 func (r *Rest) Run() {

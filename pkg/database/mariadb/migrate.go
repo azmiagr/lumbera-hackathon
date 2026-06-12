@@ -25,6 +25,7 @@ func Migrate(db *gorm.DB) error {
 		&entity.PhoneVerificationChallenge{},
 		&entity.UserPINCredential{},
 		&entity.UserSession{},
+		&entity.MemberActivationChallenge{},
 		&entity.OnboardingDraft{},
 	)
 
