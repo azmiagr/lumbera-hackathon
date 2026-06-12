@@ -1,4 +1,4 @@
-# golang-project-template
+# lumbera-hackathon
 
 A production-ready Go REST API boilerplate built on a clean 3-layer architecture. Clone this template to skip the initial setup and jump straight into writing business logic.
 
