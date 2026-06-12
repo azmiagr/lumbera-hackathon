@@ -103,7 +103,7 @@ func (s *OfficerRegistrationService) StartRegistration(req model.StartOfficerReg
 		return nil, appErrors.InternalServer("gagal menyimpan data user dan challenge")
 	}
 
-	message := fmt.Sprintf("Kode OTP LUMBERA Anda adalah %s. Berlaku selama 5 menit. Jangan bagikan kode ini kepada siapa pun.", otp)
+	message := fmt.Sprintf("Kode OTP LUMBERA Anda adalah *%s*. Berlaku selama 5 menit. Jangan bagikan kode ini kepada siapa pun.", otp)
 	err = s.deps.whatsapp.SendMessage(phoneNumber, message)
 	if err != nil {
 		return nil, err
