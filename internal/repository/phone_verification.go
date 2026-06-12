@@ -6,7 +6,7 @@ import (
 	"gorm.io/gorm"
 )
 
-type IPhoneVerification interface {
+type IPhoneVerificationRepository interface {
 	CreatePhoneVerificationChallenge(tx *gorm.DB, challenge *entity.PhoneVerificationChallenge) error
 	GetPhoneVerificationChallenge(tx *gorm.DB, param model.GetPhoneVerificationChallengeParam) (*entity.PhoneVerificationChallenge, error)
 	UpdatePhoneVerificationChallenge(tx *gorm.DB, challenge *entity.PhoneVerificationChallenge) error
@@ -16,7 +16,7 @@ type PhoneVerificationRepository struct {
 	db *gorm.DB
 }
 
-func NewPhoneVerificationRepository(db *gorm.DB) IPhoneVerification {
+func NewPhoneVerificationRepository(db *gorm.DB) IPhoneVerificationRepository {
 	return &PhoneVerificationRepository{db: db}
 }
 

@@ -3,6 +3,7 @@ package repository
 import (
 	"github.com/azmiagr/lumbera-hackathon/entity"
 	"github.com/azmiagr/lumbera-hackathon/model"
+	constants "github.com/azmiagr/lumbera-hackathon/pkg/constant"
 	"gorm.io/gorm"
 )
 
@@ -50,8 +51,8 @@ func (r *UserCooperativeMembershipRepository) GetActiveCooperativeOfficerMembers
 		Where("user_cooperative_memberships.user_id = ?", param.UserID).
 		Where("user_cooperative_memberships.status = ?", "ACTIVE").
 		Where("cooperatives.status = ?", "ACTIVE").
-		Where("roles.scope_type = ?", "COOPERATIVE").
-		Where("roles.code <> ?", "MEMBER").
+		Where("roles.scope_type = ?", constants.RoleScopeCooperative).
+		Where("roles.code = ?", constants.RoleCodePengurusKoperasi).
 		First(&membership).Error
 	if err != nil {
 		return nil, err

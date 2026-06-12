@@ -9,6 +9,10 @@ type Repository struct {
 	CooperativeRepository               ICooperativeRepository
 	FinancialConfigurationRepository    IFinancialConfigurationRepository
 	UserCooperativeMembershipRepository IUserCooperativeMembershipRepository
+	UserPinRepository                   IUserPinRepository
+	UserSessionRepository               IUserSessionRepository
+	PhoneVerificationRepository         IPhoneVerificationRepository
+	OnboardingDraftRepository           IOnboardingDraftRepository
 }
 
 func NewRepository(db *gorm.DB) *Repository {
@@ -19,5 +23,9 @@ func NewRepository(db *gorm.DB) *Repository {
 		CooperativeRepository:               NewCooperativeRepository(db),
 		FinancialConfigurationRepository:    NewFinancialConfigurationRepository(db),
 		UserCooperativeMembershipRepository: NewUserCooperativeMembershipRepository(db),
+		UserPinRepository:                   NewUserPinRepository(db),
+		UserSessionRepository:               NewUserSessionRepository(db),
+		PhoneVerificationRepository:         NewPhoneVerificationRepository(db),
+		OnboardingDraftRepository:           NewOnboardingDraftRepository(db),
 	}
 }

@@ -13,7 +13,6 @@ type UserIdentity struct {
 	NIKHash        string     `json:"nik_hash" gorm:"type:varchar(255);not null;index"`
 	KTPImageURL    string     `json:"ktp_image_url" gorm:"type:text"`
 	BirthDate      *time.Time `json:"birth_date" gorm:"type:date"`
-	Gender         string     `json:"gender" gorm:"type:enum('MALE','FEMALE','OTHER')"`
 	Address        string     `json:"address" gorm:"type:text"`
 	Occupation     string     `json:"occupation" gorm:"type:varchar(100)"`
 	BusinessSector string     `json:"business_sector" gorm:"type:varchar(100)"`
