@@ -12,6 +12,7 @@ import (
 
 type Interface interface {
 	GenerateAccessToken(input GenerateAccessTokenInput) (string, error)
+	ParseAccessToken(tokenString string) (*Claims, error)
 }
 
 type jsonWebToken struct {
@@ -60,4 +61,15 @@ func (j *jsonWebToken) GenerateAccessToken(input GenerateAccessTokenInput) (stri
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(j.SecretKey))
+}
+
+func (j *jsonWebToken) ParseAccessToken(tokenString string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(j.SecretKey), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, err
+	}
+	return claims, nil
 }

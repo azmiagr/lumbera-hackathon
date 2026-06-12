@@ -14,6 +14,8 @@ type Repository struct {
 	PhoneVerificationRepository         IPhoneVerificationRepository
 	OnboardingDraftRepository           IOnboardingDraftRepository
 	MemberActivationRepository          IMemberActivationRepository
+	MemberRepository                    IMemberRepository
+	TransactionRepository               ITransactionRepository
 }
 
 func NewRepository(db *gorm.DB) *Repository {
@@ -29,5 +31,7 @@ func NewRepository(db *gorm.DB) *Repository {
 		PhoneVerificationRepository:         NewPhoneVerificationRepository(db),
 		OnboardingDraftRepository:           NewOnboardingDraftRepository(db),
 		MemberActivationRepository:          NewMemberActivationRepository(db),
+		MemberRepository:                    NewMemberRepository(db),
+		TransactionRepository:               NewTransactionRepository(db),
 	}
 }
