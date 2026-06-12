@@ -12,6 +12,8 @@ import (
 
 type Service struct {
 	OfficerRegistrationService IOfficerRegistrationService
+	MemberActivationService    IMemberActivationService
+	AuthService                IAuthService
 }
 
 type serviceDependency struct {
@@ -35,5 +37,7 @@ func NewService(repository *repository.Repository, bcrypt bcrypt.Interface, jwtA
 
 	return &Service{
 		OfficerRegistrationService: NewOfficerRegistrationService(deps),
+		MemberActivationService:    NewMemberActivationService(deps),
+		AuthService:                NewAuthService(deps),
 	}
 }

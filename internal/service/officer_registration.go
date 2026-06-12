@@ -32,6 +32,7 @@ type IOfficerRegistrationService interface {
 	UpdateFinancialConfiguration(req model.UpdateFinancialConfigurationRequest) (*model.OnboardingStepResponse, error)
 	UpdateCooperativeBankAccount(req model.UpdateCooperativeBankAccountRequest) (*model.OnboardingStepResponse, error)
 	ActivateOnboardingDraft(req model.ActivateOnboardingDraftRequest) (*model.ActivateOnboardingDraftResponse, error)
+	GetOnboardingState(req model.GetOnboardingStateRequest) (*model.GetOnboardingStateResponse, error)
 }
 
 type OfficerRegistrationService struct {
@@ -61,6 +62,43 @@ func (s *OfficerRegistrationService) StartRegistration(req model.StartOfficerReg
 		return nil, appErrors.InternalServer("gagal memverifikasi nomor handphone")
 	}
 
+	draft, err := s.deps.repository.OnboardingDraftRepository.GetActiveOnboardingDraftByPhone(tx, phoneNumber)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.InternalServer("gagal memverifikasi proses onboarding")
+		}
+
+		draft = &entity.OnboardingDraft{
+			OnboardingDraftID: uuid.New(),
+			PhoneNumber:       phoneNumber,
+			CurrentStep:       0,
+			Status:            "OTP_PENDING",
+			ExpiresAt:         time.Now().Add(registrationDraftTTL),
+		}
+
+		err = s.deps.repository.OnboardingDraftRepository.CreateOnboardingDraft(tx, draft)
+		if err != nil {
+			return nil, appErrors.InternalServer("gagal menyimpan data onboarding")
+		}
+	} else {
+		draft.Status = "OTP_PENDING"
+		draft.ExpiresAt = time.Now().Add(registrationDraftTTL)
+		draft.PhoneVerifiedAt = nil
+		draft.PINHash = ""
+		draft.SessionTokenHash = ""
+		draft.PINSetAt = nil
+
+		err = s.deps.repository.OnboardingDraftRepository.UpdateOnboardingDraft(tx, draft)
+		if err != nil {
+			return nil, appErrors.InternalServer("gagal mereset proses onboarding")
+		}
+	}
+
+	err = s.deps.repository.PhoneVerificationRepository.DeletePhoneVerificationChallenges(tx, phoneNumber, "REGISTRATION")
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menghapus OTP lama")
+	}
+
 	otp, err := generateNumericOTP(6)
 	if err != nil {
 		return nil, appErrors.InternalServer("gagal untuk membuat kode otp")
@@ -69,19 +107,6 @@ func (s *OfficerRegistrationService) StartRegistration(req model.StartOfficerReg
 	otpHash, err := s.deps.bcrypt.GenerateFromPassword(otp)
 	if err != nil {
 		return nil, appErrors.InternalServer("gagal untuk membuat hash otp")
-	}
-
-	draft := &entity.OnboardingDraft{
-		OnboardingDraftID: uuid.New(),
-		PhoneNumber:       phoneNumber,
-		CurrentStep:       0,
-		Status:            "OTP_PENDING",
-		ExpiresAt:         time.Now().Add(registrationDraftTTL),
-	}
-
-	err = s.deps.repository.OnboardingDraftRepository.CreateOnboardingDraft(tx, draft)
-	if err != nil {
-		return nil, appErrors.InternalServer("gagal menyimpan data onboarding")
 	}
 
 	challenge := &entity.PhoneVerificationChallenge{
@@ -262,12 +287,21 @@ func (s *OfficerRegistrationService) SetPIN(req model.SetOfficerRegistrationPINR
 		return nil, appErrors.InternalServer("gagal untuk membuat hash onboarding token")
 	}
 
+	nextStep := draft.CurrentStep
+	if nextStep < 1 {
+		nextStep = 1
+	}
+
 	now := time.Now()
 	draft.PINHash = pinHash
 	draft.SessionTokenHash = onboardingTokenHash
 	draft.PINSetAt = &now
-	draft.Status = "PIN_SET"
-	draft.CurrentStep = 1
+	draft.CurrentStep = nextStep
+	if nextStep > 1 {
+		draft.Status = "IN_PROGRESS"
+	} else {
+		draft.Status = "PIN_SET"
+	}
 
 	err = s.deps.repository.OnboardingDraftRepository.UpdateOnboardingDraft(tx, draft)
 	if err != nil {
@@ -282,7 +316,7 @@ func (s *OfficerRegistrationService) SetPIN(req model.SetOfficerRegistrationPINR
 	return &model.SetOfficerRegistrationPINResponse{
 		OnboardingDraftID: draft.OnboardingDraftID,
 		OnboardingToken:   onboardingToken,
-		NextStep:          1,
+		NextStep:          nextStep,
 	}, nil
 }
 
@@ -335,6 +369,7 @@ func (s *OfficerRegistrationService) UpdatePersonalData(req model.UpdatePersonal
 	draft.FullName = req.FullName
 	draft.NIKEncrypted = req.NIKEncrypted
 	draft.NIKHash = req.NIKHash
+	draft.NIKMasked = req.NIKMasked
 	draft.RoleCode = role.Code
 	draft.PositionCode = req.PositionCode
 	draft.ExistingCooperativeCode = req.ExistingCooperativeCode
@@ -677,6 +712,249 @@ func (s *OfficerRegistrationService) ActivateOnboardingDraft(req model.ActivateO
 		MembershipID:  membershipID,
 		NextStep:      "COOPERATIVE_READY",
 	}, nil
+}
+
+func (s *OfficerRegistrationService) GetOnboardingState(req model.GetOnboardingStateRequest) (*model.GetOnboardingStateResponse, error) {
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	draft, err := s.getVerifiedDraft(tx, req.OnboardingDraftID, req.OnboardingToken)
+	if err != nil {
+		return nil, err
+	}
+
+	err = tx.Commit().Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.GetOnboardingStateResponse{
+		OnboardingDraftID: draft.OnboardingDraftID,
+		PhoneNumber:       draft.PhoneNumber,
+		Status:            draft.Status,
+		CurrentStep:       draft.CurrentStep,
+		NextStep:          resolveOnboardingNextStep(draft),
+		CompletedSteps:    resolveOnboardingCompletedSteps(draft),
+		DraftData:         buildOnboardingDraftData(draft),
+		Summary:           buildOnboardingSummary(draft),
+	}, nil
+}
+
+func buildOnboardingSummary(draft *entity.OnboardingDraft) model.OnboardingSummary {
+	return model.OnboardingSummary{
+		PersonalData: model.OnboardingPersonalSummary{
+			FullName:      draft.FullName,
+			NIKMasked:     draft.NIKMasked,
+			PhoneNumber:   formatIndonesianPhoneNumber(draft.PhoneNumber),
+			PositionLabel: resolvePositionLabel(draft.PositionCode),
+		},
+		Cooperative: model.OnboardingCooperativeSummary{
+			CooperativeType:   draft.CooperativeType,
+			CooperativeName:   draft.CooperativeName,
+			LoanConfiguration: formatLoanConfiguration(draft.MaxLoanAmountPerMember, draft.LoanInterestRateBpsPerMonth),
+			BankAccount:       formatBankAccountSummary(draft.BankName, draft.BankAccountNumber),
+		},
+	}
+}
+
+func buildOnboardingDraftData(draft *entity.OnboardingDraft) model.OnboardingDraftData {
+	return model.OnboardingDraftData{
+		PersonalData: model.OnboardingPersonalDataState{
+			FullName:                draft.FullName,
+			NIKHash:                 draft.NIKHash,
+			NIKMasked:               draft.NIKMasked,
+			KTPImageURL:             draft.KTPImageURL,
+			PositionCode:            draft.PositionCode,
+			ExistingCooperativeCode: draft.ExistingCooperativeCode,
+		},
+		CooperativeType: model.OnboardingCooperativeTypeState{
+			CooperativeType: draft.CooperativeType,
+		},
+		CooperativeProfile: model.OnboardingCooperativeProfileState{
+			CooperativeName:    draft.CooperativeName,
+			RegistrationNumber: draft.RegistrationNumber,
+			Address:            draft.Address,
+			EstablishedYear:    draft.EstablishedYear,
+		},
+		FinancialConfiguration: model.OnboardingFinancialConfigurationState{
+			MaxLoanAmountPerMember:      draft.MaxLoanAmountPerMember,
+			LoanInterestRateBpsPerMonth: draft.LoanInterestRateBpsPerMonth,
+			LateFeeRateBpsPerDay:        draft.LateFeeRateBpsPerDay,
+			MaxLoanTermMonths:           draft.MaxLoanTermMonths,
+			MandatorySavingsPerMonth:    draft.MandatorySavingsPerMonth,
+		},
+		BankAccount: model.OnboardingBankAccountState{
+			BankName:              draft.BankName,
+			BankAccountNumber:     draft.BankAccountNumber,
+			BankAccountHolderName: draft.BankAccountHolderName,
+		},
+	}
+}
+
+func resolveOnboardingNextStep(draft *entity.OnboardingDraft) string {
+	if draft.Status == "ACTIVATED" {
+		return "COOPERATIVE_READY"
+	}
+
+	if draft.FullName == "" || draft.NIKEncrypted == "" || draft.NIKHash == "" || draft.KTPImageURL == "" || draft.PositionCode == "" {
+		return "PERSONAL_DATA"
+	}
+
+	if draft.CooperativeType == "" {
+		return "COOPERATIVE_TYPE"
+	}
+
+	if draft.CooperativeName == "" || draft.RegistrationNumber == "" || draft.Address == "" || draft.EstablishedYear == 0 {
+		return "COOPERATIVE_PROFILE"
+	}
+
+	if draft.MaxLoanAmountPerMember <= 0 ||
+		draft.LoanInterestRateBpsPerMonth <= 0 ||
+		draft.MaxLoanTermMonths <= 0 ||
+		draft.MandatorySavingsPerMonth <= 0 {
+		return "FINANCIAL_CONFIGURATION"
+	}
+
+	if draft.BankName == "" || draft.BankAccountNumber == "" || draft.BankAccountHolderName == "" {
+		return "COOPERATIVE_BANK_ACCOUNT"
+	}
+
+	return "CONFIRMATION"
+}
+
+func resolveOnboardingCompletedSteps(draft *entity.OnboardingDraft) []string {
+	completedSteps := []string{}
+
+	if draft.PhoneVerifiedAt != nil {
+		completedSteps = append(completedSteps, "PHONE_VERIFICATION")
+	}
+
+	if draft.PINSetAt != nil {
+		completedSteps = append(completedSteps, "PIN")
+	}
+
+	if draft.FullName != "" && draft.NIKEncrypted != "" && draft.NIKHash != "" && draft.KTPImageURL != "" && draft.PositionCode != "" {
+		completedSteps = append(completedSteps, "PERSONAL_DATA")
+	}
+
+	if draft.CooperativeType != "" {
+		completedSteps = append(completedSteps, "COOPERATIVE_TYPE")
+	}
+
+	if draft.CooperativeName != "" && draft.RegistrationNumber != "" && draft.Address != "" && draft.EstablishedYear != 0 {
+		completedSteps = append(completedSteps, "COOPERATIVE_PROFILE")
+	}
+
+	if draft.MaxLoanAmountPerMember > 0 &&
+		draft.LoanInterestRateBpsPerMonth > 0 &&
+		draft.MaxLoanTermMonths > 0 &&
+		draft.MandatorySavingsPerMonth > 0 {
+		completedSteps = append(completedSteps, "FINANCIAL_CONFIGURATION")
+	}
+
+	if draft.BankName != "" && draft.BankAccountNumber != "" && draft.BankAccountHolderName != "" {
+		completedSteps = append(completedSteps, "COOPERATIVE_BANK_ACCOUNT")
+	}
+
+	if draft.Status == "ACTIVATED" {
+		completedSteps = append(completedSteps, "ACTIVATION")
+	}
+
+	return completedSteps
+}
+
+func resolvePositionLabel(positionCode string) string {
+	switch positionCode {
+	case constants.PositionCodeChairman:
+		return "Ketua"
+	case constants.PositionCodeTreasurer:
+		return "Bendahara"
+	case constants.PositionCodeSecretary:
+		return "Sekretaris"
+	case constants.PositionCodeStaff:
+		return "Staf"
+	default:
+		return positionCode
+	}
+}
+
+func formatIndonesianPhoneNumber(phoneNumber string) string {
+	if strings.HasPrefix(phoneNumber, "62") {
+		return "0" + strings.TrimPrefix(phoneNumber, "62")
+	}
+
+	return phoneNumber
+}
+
+func formatLoanConfiguration(maxLoanAmount int64, interestRateBps int) string {
+	if maxLoanAmount <= 0 && interestRateBps <= 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("%s · %s/bln", formatRupiah(maxLoanAmount), formatBpsPercent(interestRateBps))
+}
+
+func formatRupiah(amount int64) string {
+	if amount <= 0 {
+		return "Rp 0"
+	}
+
+	raw := fmt.Sprintf("%d", amount)
+	result := ""
+
+	for i, digit := range reverseString(raw) {
+		if i > 0 && i%3 == 0 {
+			result = "." + result
+		}
+		result = string(digit) + result
+	}
+
+	return "Rp " + result
+}
+
+func formatBpsPercent(bps int) string {
+	if bps <= 0 {
+		return "0%"
+	}
+
+	integerPart := bps / 100
+	decimalPart := bps % 100
+
+	if decimalPart == 0 {
+		return fmt.Sprintf("%d%%", integerPart)
+	}
+
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%d,%02d", integerPart, decimalPart), "0"), ",") + "%"
+}
+
+func formatBankAccountSummary(bankName string, accountNumber string) string {
+	if bankName == "" && accountNumber == "" {
+		return ""
+	}
+
+	if accountNumber == "" {
+		return bankName
+	}
+
+	lastDigits := accountNumber
+	if len(accountNumber) > 4 {
+		lastDigits = accountNumber[len(accountNumber)-4:]
+	}
+
+	if bankName == "" {
+		return "xxxx-" + lastDigits
+	}
+
+	return bankName + " · xxxx-" + lastDigits
+}
+
+func reverseString(value string) string {
+	runes := []rune(value)
+	for left, right := 0, len(runes)-1; left < right; left, right = left+1, right-1 {
+		runes[left], runes[right] = runes[right], runes[left]
+	}
+
+	return string(runes)
 }
 
 func (s *OfficerRegistrationService) validateDraftReadyForActivation(tx *gorm.DB, draft *entity.OnboardingDraft) error {

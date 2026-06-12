@@ -64,3 +64,26 @@ type LoginOfficerResponse struct {
 	CooperativeID uuid.UUID `json:"cooperative_id"`
 	RoleID        uuid.UUID `json:"role_id"`
 }
+
+type GetCooperativeLoginContextParam struct {
+	PhoneNumber string    `json:"-"`
+	UserID      uuid.UUID `json:"-"`
+}
+
+type LoginRequest struct {
+	PhoneNumber string `json:"phone_number"`
+	PIN         string `json:"pin"`
+	DeviceID    string `json:"device_id"`
+	IPAddress   string `json:"ip_address"`
+	UserAgent   string `json:"user_agent"`
+}
+
+type LoginResponse struct {
+	AccessToken   string     `json:"access_token"`
+	RefreshToken  string     `json:"refresh_token"`
+	UserID        uuid.UUID  `json:"user_id"`
+	CooperativeID uuid.UUID  `json:"cooperative_id"`
+	RoleID        uuid.UUID  `json:"role_id"`
+	RoleCode      string     `json:"role_code"`
+	MemberID      *uuid.UUID `json:"member_id"`
+}

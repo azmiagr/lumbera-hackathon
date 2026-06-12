@@ -81,6 +81,7 @@ func (r *Rest) UpdateOnboardingPersonalData(c *gin.Context) {
 		FullName:                c.PostForm("full_name"),
 		NIKEncrypted:            c.PostForm("nik_encrypted"),
 		NIKHash:                 c.PostForm("nik_hash"),
+		NIKMasked:               c.PostForm("nik_masked"),
 		PositionCode:            c.PostForm("position_code"),
 		ExistingCooperativeCode: c.PostForm("existing_cooperative_code"),
 	}
@@ -212,6 +213,26 @@ func (r *Rest) ActivateOnboardingDraft(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusCreated, "success to activate cooperative", result)
+}
+
+func (r *Rest) GetOnboardingState(c *gin.Context) {
+	draftID, token, ok := r.parseOnboardingDraftContext(c)
+	if !ok {
+		return
+	}
+
+	req := model.GetOnboardingStateRequest{
+		OnboardingDraftID: draftID,
+		OnboardingToken:   token,
+	}
+
+	result, err := r.service.OfficerRegistrationService.GetOnboardingState(req)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "success to get onboarding state", result)
 }
 
 func (r *Rest) parseOnboardingDraftContext(c *gin.Context) (uuid.UUID, string, bool) {

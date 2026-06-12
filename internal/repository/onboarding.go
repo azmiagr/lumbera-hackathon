@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/azmiagr/lumbera-hackathon/entity"
 	"github.com/azmiagr/lumbera-hackathon/model"
 	"gorm.io/gorm"
@@ -9,6 +11,7 @@ import (
 type IOnboardingDraftRepository interface {
 	CreateOnboardingDraft(tx *gorm.DB, draft *entity.OnboardingDraft) error
 	GetOnboardingDraft(tx *gorm.DB, param model.GetOnboardingDraftParam) (*entity.OnboardingDraft, error)
+	GetActiveOnboardingDraftByPhone(tx *gorm.DB, phoneNumber string) (*entity.OnboardingDraft, error)
 	UpdateOnboardingDraft(tx *gorm.DB, draft *entity.OnboardingDraft) error
 }
 
@@ -35,6 +38,22 @@ func (r *OnboardingDraftRepository) GetOnboardingDraft(tx *gorm.DB, param model.
 		return nil, err
 	}
 	return draft, nil
+}
+
+func (r *OnboardingDraftRepository) GetActiveOnboardingDraftByPhone(tx *gorm.DB, phoneNumber string) (*entity.OnboardingDraft, error) {
+	var draft entity.OnboardingDraft
+
+	err := tx.Debug().
+		Where("phone_number = ?", phoneNumber).
+		Where("status IN ?", []string{"OTP_PENDING", "OTP_VERIFIED", "PIN_SET", "IN_PROGRESS"}).
+		Where("expires_at > ?", time.Now()).
+		Order("created_at DESC").
+		First(&draft).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &draft, nil
 }
 
 func (r *OnboardingDraftRepository) UpdateOnboardingDraft(tx *gorm.DB, draft *entity.OnboardingDraft) error {

@@ -77,6 +77,7 @@ type UpdatePersonalDataRequest struct {
 	FullName                string                `form:"full_name"`
 	NIKEncrypted            string                `form:"nik_encrypted"`
 	NIKHash                 string                `form:"nik_hash"`
+	NIKMasked               string                `form:"nik_masked"`
 	PositionCode            string                `form:"position_code"`
 	ExistingCooperativeCode string                `form:"existing_cooperative_code"`
 }
@@ -130,4 +131,81 @@ type ActivateOnboardingDraftResponse struct {
 	CooperativeID uuid.UUID `json:"cooperative_id"`
 	MembershipID  uuid.UUID `json:"membership_id"`
 	NextStep      string    `json:"next_step"`
+}
+
+type GetOnboardingStateRequest struct {
+	OnboardingDraftID uuid.UUID `json:"-"`
+	OnboardingToken   string    `json:"-"`
+}
+
+type GetOnboardingStateResponse struct {
+	OnboardingDraftID uuid.UUID           `json:"onboarding_draft_id"`
+	PhoneNumber       string              `json:"phone_number"`
+	Status            string              `json:"status"`
+	CurrentStep       int                 `json:"current_step"`
+	NextStep          string              `json:"next_step"`
+	CompletedSteps    []string            `json:"completed_steps"`
+	DraftData         OnboardingDraftData `json:"draft_data"`
+	Summary           OnboardingSummary   `json:"summary"`
+}
+
+type OnboardingDraftData struct {
+	PersonalData           OnboardingPersonalDataState           `json:"personal_data"`
+	CooperativeType        OnboardingCooperativeTypeState        `json:"cooperative_type"`
+	CooperativeProfile     OnboardingCooperativeProfileState     `json:"cooperative_profile"`
+	FinancialConfiguration OnboardingFinancialConfigurationState `json:"financial_configuration"`
+	BankAccount            OnboardingBankAccountState            `json:"bank_account"`
+}
+
+type OnboardingPersonalDataState struct {
+	FullName                string `json:"full_name"`
+	NIKHash                 string `json:"nik_hash"`
+	NIKMasked               string `json:"nik_masked"`
+	KTPImageURL             string `json:"ktp_image_url"`
+	PositionCode            string `json:"position_code"`
+	ExistingCooperativeCode string `json:"existing_cooperative_code"`
+}
+
+type OnboardingCooperativeTypeState struct {
+	CooperativeType string `json:"cooperative_type"`
+}
+
+type OnboardingCooperativeProfileState struct {
+	CooperativeName    string `json:"cooperative_name"`
+	RegistrationNumber string `json:"registration_number"`
+	Address            string `json:"address"`
+	EstablishedYear    int    `json:"established_year"`
+}
+
+type OnboardingFinancialConfigurationState struct {
+	MaxLoanAmountPerMember      int64 `json:"max_loan_amount_per_member"`
+	LoanInterestRateBpsPerMonth int   `json:"loan_interest_rate_bps_per_month"`
+	LateFeeRateBpsPerDay        int   `json:"late_fee_rate_bps_per_day"`
+	MaxLoanTermMonths           int   `json:"max_loan_term_months"`
+	MandatorySavingsPerMonth    int64 `json:"mandatory_savings_per_month"`
+}
+
+type OnboardingBankAccountState struct {
+	BankName              string `json:"bank_name"`
+	BankAccountNumber     string `json:"bank_account_number"`
+	BankAccountHolderName string `json:"bank_account_holder_name"`
+}
+
+type OnboardingSummary struct {
+	PersonalData OnboardingPersonalSummary    `json:"personal_data"`
+	Cooperative  OnboardingCooperativeSummary `json:"cooperative"`
+}
+
+type OnboardingPersonalSummary struct {
+	FullName      string `json:"full_name"`
+	NIKMasked     string `json:"nik_masked"`
+	PhoneNumber   string `json:"phone_number"`
+	PositionLabel string `json:"position_label"`
+}
+
+type OnboardingCooperativeSummary struct {
+	CooperativeType   string `json:"cooperative_type"`
+	CooperativeName   string `json:"cooperative_name"`
+	LoanConfiguration string `json:"loan_configuration"`
+	BankAccount       string `json:"bank_account"`
 }
