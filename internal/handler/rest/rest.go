@@ -46,6 +46,9 @@ func (r *Rest) MountEndpoint() {
 
 	auth := baseURL.Group("/auth")
 	auth.POST("login", r.Login)
+	auth.POST("forgot-pin/request-otp", r.RequestForgotPINOTP)
+	auth.POST("forgot-pin/verify-otp", r.VerifyForgotPINOTP)
+	auth.POST("forgot-pin/set-pin", r.SetForgottenPIN)
 }
 
 func (r *Rest) Run() {

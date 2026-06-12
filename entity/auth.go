@@ -7,15 +7,18 @@ import (
 )
 
 type PhoneVerificationChallenge struct {
-	ChallengeID  uuid.UUID  `json:"challenge_id" gorm:"type:varchar(36);primaryKey"`
-	PhoneNumber  string     `json:"phone_number" gorm:"type:varchar(20);not null;index"`
-	OTPHash      string     `json:"-" gorm:"type:varchar(255);not null"`
-	Purpose      string     `json:"purpose" gorm:"type:enum('REGISTRATION','LOGIN','PIN_RESET');not null"`
-	AttemptCount int        `json:"attempt_count" gorm:"default:0"`
-	ExpiresAt    time.Time  `json:"expires_at" gorm:"not null"`
-	VerifiedAt   *time.Time `json:"verified_at"`
-	CreatedAt    time.Time  `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt    time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+	ChallengeID                uuid.UUID  `json:"challenge_id" gorm:"type:varchar(36);primaryKey"`
+	PhoneNumber                string     `json:"phone_number" gorm:"type:varchar(20);not null;index"`
+	OTPHash                    string     `json:"-" gorm:"type:varchar(255);not null"`
+	Purpose                    string     `json:"purpose" gorm:"type:enum('REGISTRATION','LOGIN','PIN_RESET');not null"`
+	AttemptCount               int        `json:"attempt_count" gorm:"default:0"`
+	ExpiresAt                  time.Time  `json:"expires_at" gorm:"not null"`
+	VerifiedAt                 *time.Time `json:"verified_at"`
+	VerificationTokenHash      string     `json:"-" gorm:"type:varchar(255)"`
+	VerificationTokenExpiresAt *time.Time `json:"verification_token_expires_at"`
+	ConsumedAt                 *time.Time `json:"consumed_at"`
+	CreatedAt                  time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt                  time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 type UserPINCredential struct {
