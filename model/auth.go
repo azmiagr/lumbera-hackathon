@@ -87,3 +87,35 @@ type LoginResponse struct {
 	RoleCode      string     `json:"role_code"`
 	MemberID      *uuid.UUID `json:"member_id"`
 }
+
+type ForgotPINRequestOTPRequest struct {
+	PhoneNumber string `json:"phone_number"`
+}
+
+type ForgotPINRequestOTPResponse struct {
+	ChallengeID      uuid.UUID `json:"challenge_id"`
+	PhoneNumber      string    `json:"phone_number"`
+	ExpiresInSeconds int       `json:"expires_in_seconds"`
+}
+
+type ForgotPINVerifyOTPRequest struct {
+	ChallengeID uuid.UUID `json:"challenge_id"`
+	PhoneNumber string    `json:"phone_number"`
+	OTP         string    `json:"otp"`
+}
+
+type ForgotPINVerifyOTPResponse struct {
+	ChallengeID      uuid.UUID `json:"challenge_id"`
+	PinResetToken    string    `json:"pin_reset_token"`
+	ExpiresInSeconds int       `json:"expires_in_seconds"`
+}
+
+type ForgotPINSetPINRequest struct {
+	ChallengeID   uuid.UUID `json:"challenge_id"`
+	PinResetToken string    `json:"pin_reset_token"`
+	PIN           string    `json:"pin"`
+	ConfirmPIN    string    `json:"confirm_pin"`
+	DeviceID      string    `json:"device_id"`
+	IPAddress     string    `json:"ip_address"`
+	UserAgent     string    `json:"user_agent"`
+}
