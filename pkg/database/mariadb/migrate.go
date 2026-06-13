@@ -36,6 +36,7 @@ func Migrate(db *gorm.DB) error {
 		&entity.JournalEntryLine{},
 		&entity.MemberImportBatch{},
 		&entity.MemberImportRow{},
+		&entity.MCSScoreSnapshot{},
 	)
 
 	if err != nil {

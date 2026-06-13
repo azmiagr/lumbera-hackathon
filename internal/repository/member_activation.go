@@ -33,7 +33,7 @@ func NewMemberActivationRepository(db *gorm.DB) IMemberActivationRepository {
 func (r *MemberActivationRepository) GetEligibleMemberActivationContext(tx *gorm.DB, param model.GetEligibleMemberActivationContextParam) (*MemberActivationContext, error) {
 	var user entity.User
 	query := tx.Debug().
-		Where("status = ?", "PIN_REQUIRED").
+		Where("status IN ?", []string{"ACTIVE", "PIN_REQUIRED"}).
 		Where("user_type = ?", "COOPERATIVE")
 
 	if param.UserID != uuid.Nil {

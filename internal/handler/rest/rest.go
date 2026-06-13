@@ -73,6 +73,10 @@ func (r *Rest) MountEndpoint() {
 	members.PATCH("/imports/:batchID/rows/:rowID", r.UpdateMemberImportRow)
 	members.DELETE("/imports/:batchID/rows/:rowID", r.DeleteMemberImportRow)
 	members.POST("/imports/:batchID/submit", r.SubmitMemberImport)
+	members.POST("/:memberID/mcs/run", r.TriggerMemberMCS)
+
+	internal := baseURL.Group("/internal")
+	internal.PATCH("/mcs/callback", r.ApplyMCSCallback)
 
 	reports := baseURL.Group("/reports")
 	reports.Use(r.middleware.AuthenticateUser())
