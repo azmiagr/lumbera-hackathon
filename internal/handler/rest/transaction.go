@@ -81,6 +81,29 @@ func (r *Rest) ListTransactions(c *gin.Context) {
 	response.Success(c, http.StatusOK, "success to get transactions", result)
 }
 
+func (r *Rest) CreateLoanTransaction(c *gin.Context) {
+	authContext, ok := getAuthContext(c)
+	if !ok {
+		return
+	}
+
+	var req model.CreateLoanTransactionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
+		return
+	}
+
+	req.AuthContext = authContext
+
+	result, err := r.service.TransactionService.CreateLoanTransaction(req)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "success to create loan transaction", result)
+}
+
 func getAuthContext(c *gin.Context) (model.AuthContext, bool) {
 	value, exists := c.Get("auth_claims")
 	if !exists {

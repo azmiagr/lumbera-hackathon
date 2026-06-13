@@ -16,6 +16,7 @@ type Cooperative struct {
 	BankAccountHolderName string    `json:"bank_account_holder_name" gorm:"type:varchar(255);not null"`
 
 	FinancialConfiguration     *FinancialConfiguration     `json:"financial_configuration" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
+	MemberImportBatchs         []MemberImportBatch         `json:"member_import_batchs" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 	Accounts                   []Account                   `json:"accounts" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 	JournalEntries             []JournalEntry              `json:"journal_entries" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 	UserCooperativeMemberships []UserCooperativeMembership `json:"user_cooperative_memberships" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`

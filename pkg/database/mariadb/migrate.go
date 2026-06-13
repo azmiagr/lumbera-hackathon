@@ -31,6 +31,8 @@ func Migrate(db *gorm.DB) error {
 		&entity.Account{},
 		&entity.JournalEntry{},
 		&entity.JournalEntryLine{},
+		&entity.MemberImportBatch{},
+		&entity.MemberImportRow{},
 	)
 
 	if err != nil {
