@@ -62,7 +62,7 @@ func (r *UserRepository) GetCooperativeLoginContext(tx *gorm.DB, param model.Get
 	var user entity.User
 
 	userQuery := tx.Debug().
-		Where("status = ?", "ACTIVE").
+		Where("status IN ?", []string{"ACTIVE", "PIN_REQUIRED"}).
 		Where("user_type = ?", "COOPERATIVE")
 
 	if param.UserID != uuid.Nil {

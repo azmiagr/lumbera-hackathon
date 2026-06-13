@@ -21,6 +21,7 @@ type CheckMemberPhoneResponse struct {
 	ActivationToken       string    `json:"activation_token"`
 	PhoneNumber           string    `json:"phone_number"`
 	ExpiresInSeconds      int       `json:"expires_in_seconds"`
+	Status                string    `json:"status"`
 }
 
 type SetMemberPINRequest struct {

@@ -51,6 +51,11 @@ func (s *MemberActivationService) CheckPhone(req model.CheckMemberPhoneRequest) 
 		return nil, err
 	}
 
+	status := "INACTIVE"
+	if activationCtx.User.Status == "ACTIVE" {
+		status = "ACTIVE"
+	}
+
 	activationToken, err := generateSecureToken(32)
 	if err != nil {
 		return nil, appErrors.InternalServer("gagal membuat token aktivasi")
@@ -83,6 +88,7 @@ func (s *MemberActivationService) CheckPhone(req model.CheckMemberPhoneRequest) 
 		ActivationToken:       activationToken,
 		PhoneNumber:           phoneNumber,
 		ExpiresInSeconds:      int(memberActivationTokenTTL.Seconds()),
+		Status:                status,
 	}, nil
 }
 

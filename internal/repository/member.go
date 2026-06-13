@@ -30,11 +30,15 @@ func NewMemberRepository(db *gorm.DB) IMemberRepository {
 func (r *MemberRepository) GetActiveMember(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*entity.Member, error) {
 	var member entity.Member
 
-	err := tx.Debug().
+	query := tx.Debug().
 		Where("member_id = ?", memberID).
-		Where("cooperative_id = ?", cooperativeID).
-		Where("member_status = ?", "ACTIVE").
-		First(&member).Error
+		Where("member_status = ?", "ACTIVE")
+
+	if cooperativeID != uuid.Nil {
+		query = query.Where("cooperative_id = ?", cooperativeID)
+	}
+
+	err := query.First(&member).Error
 	if err != nil {
 		return nil, err
 	}

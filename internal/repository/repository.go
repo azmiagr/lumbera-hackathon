@@ -20,6 +20,7 @@ type Repository struct {
 	AccountingRepository                IAccountingRepository
 	CHSRepository                       ICHSRepository
 	MemberImportRepository              IMemberImportRepository
+	MCSRepository                       IMCSRepository
 }
 
 func NewRepository(db *gorm.DB) *Repository {
@@ -41,5 +42,6 @@ func NewRepository(db *gorm.DB) *Repository {
 		AccountingRepository:                NewAccountingRepository(db),
 		CHSRepository:                       NewCHSRepository(db),
 		MemberImportRepository:              NewMemberImportRepository(db),
+		MCSRepository:                       NewMCSRepository(db),
 	}
 }
