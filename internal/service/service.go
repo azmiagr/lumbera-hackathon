@@ -21,6 +21,9 @@ type Service struct {
 	MCSService                 IMCSService
 	MemberDashboardService     IMemberDashboardService
 	SavingsBookService         ISavingsBookService
+	LoanDashboardService       ILoanDashboardService
+	LoanApplicationService     ILoanApplicationService
+	CreditAccessService        ICreditAccessService
 }
 
 type serviceDependency struct {
@@ -54,5 +57,8 @@ func NewService(repository *repository.Repository, bcrypt bcrypt.Interface, jwtA
 		MCSService:                 NewMCSService(deps),
 		MemberDashboardService:     NewMemberDashboardService(deps),
 		SavingsBookService:         NewSavingsBookService(deps),
+		LoanDashboardService:       NewLoanDashboardService(deps),
+		LoanApplicationService:     NewLoanApplicationService(deps),
+		CreditAccessService:        NewCreditAccessService(deps),
 	}
 }

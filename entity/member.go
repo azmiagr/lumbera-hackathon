@@ -21,6 +21,9 @@ type Member struct {
 	UpdatedAt          time.Time      `json:"updated_at" gorm:"autoUpdateTime"`
 	DeletedAt          gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 
+	MemberDataConsents         []MemberDataConsent         `json:"member_data_consents" gorm:"foreignKey:MemberID;constraint:onDelete:CASCADE"`
+	CreditAccessRequests       []CreditAccessRequest       `json:"credit_access_requests" gorm:"foreignKey:MemberID;constraint:onDelete:CASCADE"`
+	LoanApplications           []LoanApplication           `json:"loan_applications" gorm:"foreignKey:MemberID;constraint:onDelete:CASCADE"`
 	Transactions               []Transaction               `json:"transactions" gorm:"foreignKey:MemberID;constraint:onDelete:CASCADE"`
 	UserCooperativeMemberships []UserCooperativeMembership `json:"user_cooperative_memberships" gorm:"foreignKey:MemberID;constraint:onDelete:CASCADE"`
 }

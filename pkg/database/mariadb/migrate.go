@@ -31,6 +31,9 @@ func Migrate(db *gorm.DB) error {
 		&entity.LoanAccount{},
 		&entity.LoanInstallmentSchedule{},
 		&entity.LoanPaymentAllocation{},
+		&entity.LoanApplication{},
+		&entity.CreditAccessRequest{},
+		&entity.MemberDataConsent{},
 		&entity.Account{},
 		&entity.JournalEntry{},
 		&entity.JournalEntryLine{},
@@ -43,7 +46,11 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 
-	return seedRoles(db)
+	if err := seedRoles(db); err != nil {
+		return err
+	}
+
+	return seedPartners(db)
 }
 
 func seedRoles(db *gorm.DB) error {
@@ -105,6 +112,43 @@ func seedRoles(db *gorm.DB) error {
 				IsSystemRole: role.IsSystemRole,
 			}).
 			FirstOrCreate(&existingRole).Error
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func seedPartners(db *gorm.DB) error {
+	partners := []entity.Partner{
+		{
+			PartnerID:              uuid.New(),
+			Name:                   "Akseleran",
+			PartnerType:            "FINTECH",
+			OJKRegistrationNumber:  "KEP-122/D.05/2019",
+			Status:                 "ACTIVE",
+			APIAccessEnabled:       true,
+			DefaultRateLimitPerDay: 1000,
+		},
+	}
+
+	for _, partner := range partners {
+		existingPartner := entity.Partner{}
+		err := db.
+			Where("name = ?", partner.Name).
+			Attrs(entity.Partner{
+				PartnerID: partner.PartnerID,
+				Name:      partner.Name,
+			}).
+			Assign(entity.Partner{
+				PartnerType:            partner.PartnerType,
+				OJKRegistrationNumber:  partner.OJKRegistrationNumber,
+				Status:                 partner.Status,
+				APIAccessEnabled:       partner.APIAccessEnabled,
+				DefaultRateLimitPerDay: partner.DefaultRateLimitPerDay,
+			}).
+			FirstOrCreate(&existingPartner).Error
 		if err != nil {
 			return err
 		}
