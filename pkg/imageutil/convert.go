@@ -38,6 +38,7 @@ func ConvertToWebP(file *multipart.FileHeader) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read webp image: %w", err)
 		}
+
 		if _, err := webp.DecodeConfig(bytes.NewReader(data)); err != nil {
 			return nil, fmt.Errorf("failed to decode webp image: %w", err)
 		}
