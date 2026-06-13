@@ -6,13 +6,12 @@ Project ini dibangun dengan Go, Gin, GORM, dan MariaDB. Backend ini menjadi API 
 
 ## Dokumentasi
 
-| Dokumen | Keterangan |
-|---|---|
+| Dokumen                                                                                 | Keterangan                                         |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------- |
 | [Postman API Documentation](https://documenter.getpostman.com/view/33317073/2sBXwsMVk4) | Dokumentasi endpoint API untuk testing via Postman |
-| [docs/LUMBERA-PRD.md](docs/LUMBERA-PRD.md) | Product Requirement Document |
-| [docs/LUMBERA-OFFLINE-SYNC-FRONTEND.md](docs/LUMBERA-OFFLINE-SYNC-FRONTEND.md) | Panduan frontend untuk offline sync |
-| [docs/LUMBERA-MCS-Calculation.md](docs/LUMBERA-MCS-Calculation.md) | Spesifikasi Member Creditworthiness Score |
-| [docs/LUMBERA-CHS-Calculation.md](docs/LUMBERA-CHS-Calculation.md) | Spesifikasi Cooperative Health Score |
+| [docs/LUMBERA-PRD.md](docs/LUMBERA-PRD.md)                                              | Product Requirement Document                       |
+| [docs/LUMBERA-MCS-Calculation.md](docs/LUMBERA-MCS-Calculation.md)                      | Spesifikasi Member Creditworthiness Score          |
+| [docs/LUMBERA-CHS-Calculation.md](docs/LUMBERA-CHS-Calculation.md)                      | Spesifikasi Cooperative Health Score               |
 
 ## Fitur Utama
 
@@ -29,16 +28,16 @@ Project ini dibangun dengan Go, Gin, GORM, dan MariaDB. Backend ini menjadi API 
 
 ## Tech Stack
 
-| Komponen | Teknologi |
-|---|---|
-| Language | Go |
-| HTTP Framework | Gin |
-| ORM | GORM |
-| Database | MariaDB/MySQL |
-| Auth | JWT + bcrypt |
-| File/Object Storage | Supabase Storage |
-| WhatsApp/OTP Provider | Fonnte |
-| External Scoring API | MCS scoring API |
+| Komponen              | Teknologi        |
+| --------------------- | ---------------- |
+| Language              | Go               |
+| HTTP Framework        | Gin              |
+| ORM                   | GORM             |
+| Database              | MariaDB/MySQL    |
+| Auth                  | JWT + bcrypt     |
+| File/Object Storage   | Supabase Storage |
+| WhatsApp/OTP Provider | Fonnte           |
+| External Scoring API  | MCS scoring API  |
 
 ## Struktur Project
 
@@ -263,12 +262,12 @@ Offline sync dipakai frontend PWA untuk menyimpan transaksi saat device tidak pu
 
 Endpoint utama:
 
-| Endpoint | Fungsi |
-|---|---|
-| `GET /api/v1/sync/config` | Mengambil aturan sync seperti max batch dan supported operations |
-| `GET /api/v1/sync/bootstrap` | Mengambil cache awal untuk mode offline |
-| `POST /api/v1/sync/push` | Mengirim queue operasi offline ke server |
-| `GET /api/v1/sync/status` | Mengecek apakah id lokal tertentu sudah tersinkron |
+| Endpoint                     | Fungsi                                                           |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `GET /api/v1/sync/config`    | Mengambil aturan sync seperti max batch dan supported operations |
+| `GET /api/v1/sync/bootstrap` | Mengambil cache awal untuk mode offline                          |
+| `POST /api/v1/sync/push`     | Mengirim queue operasi offline ke server                         |
+| `GET /api/v1/sync/status`    | Mengecek apakah id lokal tertentu sudah tersinkron               |
 
 Mental model:
 
@@ -291,18 +290,18 @@ Route utama berada di bawah prefix:
 
 Group endpoint:
 
-| Group | Keterangan |
-|---|---|
-| `/onboarding` | Registrasi pengurus, OTP, setup PIN, draft onboarding, aktivasi koperasi |
-| `/auth` | Login, forgot PIN, logout |
-| `/members` | Manajemen anggota dan import anggota |
-| `/transactions` | Transaksi simpan pinjam dan reversal |
-| `/store` | Produk, stok, mutasi, dan penjualan toko koperasi |
-| `/sync` | Offline sync API |
-| `/ledger` | Audit dan anchor ledger |
-| `/cooperative-members` | Dashboard anggota, buku tabungan, pinjaman, MCS, consent |
-| `/reports` | Laporan finansial, CHS, dashboard summary |
-| `/internal` | Callback internal seperti MCS scoring callback |
+| Group                  | Keterangan                                                               |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `/onboarding`          | Registrasi pengurus, OTP, setup PIN, draft onboarding, aktivasi koperasi |
+| `/auth`                | Login, forgot PIN, logout                                                |
+| `/members`             | Manajemen anggota dan import anggota                                     |
+| `/transactions`        | Transaksi simpan pinjam dan reversal                                     |
+| `/store`               | Produk, stok, mutasi, dan penjualan toko koperasi                        |
+| `/sync`                | Offline sync API                                                         |
+| `/ledger`              | Audit dan anchor ledger                                                  |
+| `/cooperative-members` | Dashboard anggota, buku tabungan, pinjaman, MCS, consent                 |
+| `/reports`             | Laporan finansial, CHS, dashboard summary                                |
+| `/internal`            | Callback internal seperti MCS scoring callback                           |
 
 ## Response Format
 
