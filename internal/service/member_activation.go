@@ -162,15 +162,6 @@ func (s *MemberActivationService) SetPIN(req model.SetMemberPINRequest) (*model.
 		return nil, appErrors.InternalServer("gagal menyimpan pin anggota")
 	}
 
-	accessToken, err := s.deps.jwtAuth.GenerateAccessToken(jwt.GenerateAccessTokenInput{
-		UserID:        activationCtx.User.UserID,
-		CooperativeID: activationCtx.Member.CooperativeID,
-		RoleCode:      constants.RoleCodeAnggota,
-	})
-	if err != nil {
-		return nil, appErrors.InternalServer("gagal membuat access token")
-	}
-
 	refreshToken, err := generateSecureToken(32)
 	if err != nil {
 		return nil, appErrors.InternalServer("gagal membuat refresh token")
@@ -189,6 +180,16 @@ func (s *MemberActivationService) SetPIN(req model.SetMemberPINRequest) (*model.
 		IPAddress:        req.IPAddress,
 		UserAgent:        req.UserAgent,
 		ExpiresAt:        time.Now().Add(memberRefreshTokenTTL),
+	}
+
+	accessToken, err := s.deps.jwtAuth.GenerateAccessToken(jwt.GenerateAccessTokenInput{
+		UserID:        activationCtx.User.UserID,
+		CooperativeID: activationCtx.Member.CooperativeID,
+		SessionID:     session.SessionID,
+		RoleCode:      constants.RoleCodeAnggota,
+	})
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal membuat access token")
 	}
 
 	err = s.deps.repository.UserSessionRepository.CreateUserSession(tx, session)

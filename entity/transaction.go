@@ -11,7 +11,7 @@ type Transaction struct {
 	CooperativeID       uuid.UUID  `json:"cooperative_id" gorm:"type:varchar(36);not null;index;uniqueIndex:idx_coop_client_transaction"`
 	MemberID            uuid.UUID  `json:"member_id" gorm:"type:varchar(36);not null;index"`
 	OfficerID           uuid.UUID  `json:"officer_id" gorm:"type:varchar(36);not null;index"`
-	TransactionType     string     `json:"transaction_type" gorm:"type:enum('SIMPANAN_POKOK','SIMPANAN_WAJIB','SIMPANAN_SUKARELA','PINJAMAN','ANGSURAN');not null;index"`
+	TransactionType     string     `json:"transaction_type" gorm:"type:enum('SIMPANAN_POKOK','SIMPANAN_WAJIB','SIMPANAN_SUKARELA','PINJAMAN','ANGSURAN','TARIK_TUNAI');not null;index"`
 	Amount              int64      `json:"amount" gorm:"not null"`
 	Description         string     `json:"description" gorm:"type:text"`
 	RecordedAt          time.Time  `json:"recorded_at" gorm:"not null;index"`

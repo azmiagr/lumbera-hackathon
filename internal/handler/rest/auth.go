@@ -91,3 +91,20 @@ func (r *Rest) SetForgottenPIN(c *gin.Context) {
 
 	response.Success(c, http.StatusOK, "success to reset PIN", result)
 }
+
+func (r *Rest) Logout(c *gin.Context) {
+	authContext, ok := getAuthContext(c)
+	if !ok {
+		return
+	}
+
+	result, err := r.service.AuthService.Logout(model.LogoutRequest{
+		AuthContext: authContext,
+	})
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "success to logout", result)
+}

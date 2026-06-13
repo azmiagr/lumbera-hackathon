@@ -26,6 +26,8 @@ type IAuthService interface {
 	RequestForgotPINOTP(req model.ForgotPINRequestOTPRequest) (*model.ForgotPINRequestOTPResponse, error)
 	VerifyForgotPINOTP(req model.ForgotPINVerifyOTPRequest) (*model.ForgotPINVerifyOTPResponse, error)
 	SetForgottenPIN(req model.ForgotPINSetPINRequest) (*model.LoginResponse, error)
+	Logout(req model.LogoutRequest) (*model.LogoutResponse, error)
+	ValidateAuthenticatedSession(auth model.AuthContext) error
 }
 
 type AuthService struct {
@@ -64,6 +66,10 @@ func (s *AuthService) Login(req model.LoginRequest) (*model.LoginResponse, error
 		return nil, err
 	}
 
+	if loginCtx.User.Status == "PIN_REQUIRED" {
+		return nil, appErrors.Forbidden("akun belum memiliki PIN")
+	}
+
 	userPin, err := s.deps.repository.UserPinRepository.GetUserPinCredential(tx, model.GetUserPINCredentialParam{
 		UserID: loginCtx.User.UserID,
 	})
@@ -99,15 +105,6 @@ func (s *AuthService) Login(req model.LoginRequest) (*model.LoginResponse, error
 		return nil, appErrors.InternalServer("gagal memperbarui kredensial pin")
 	}
 
-	accessToken, err := s.deps.jwtAuth.GenerateAccessToken(jwt.GenerateAccessTokenInput{
-		UserID:        loginCtx.User.UserID,
-		CooperativeID: loginCtx.Membership.CooperativeID,
-		RoleCode:      loginCtx.Role.Code,
-	})
-	if err != nil {
-		return nil, appErrors.InternalServer("gagal membuat access token")
-	}
-
 	refreshToken, err := generateSecureToken(32)
 	if err != nil {
 		return nil, appErrors.InternalServer("gagal membuat refresh token")
@@ -126,6 +123,16 @@ func (s *AuthService) Login(req model.LoginRequest) (*model.LoginResponse, error
 		IPAddress:        req.IPAddress,
 		UserAgent:        req.UserAgent,
 		ExpiresAt:        time.Now().Add(loginRefreshTokenTTL),
+	}
+
+	accessToken, err := s.deps.jwtAuth.GenerateAccessToken(jwt.GenerateAccessTokenInput{
+		UserID:        loginCtx.User.UserID,
+		CooperativeID: loginCtx.Membership.CooperativeID,
+		SessionID:     session.SessionID,
+		RoleCode:      loginCtx.Role.Code,
+	})
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal membuat access token")
 	}
 
 	err = s.deps.repository.UserSessionRepository.CreateUserSession(tx, session)
@@ -431,15 +438,6 @@ func (s *AuthService) SetForgottenPIN(req model.ForgotPINSetPINRequest) (*model.
 		return nil, appErrors.InternalServer("gagal menyelesaikan reset PIN")
 	}
 
-	accessToken, err := s.deps.jwtAuth.GenerateAccessToken(jwt.GenerateAccessTokenInput{
-		UserID:        loginCtx.User.UserID,
-		CooperativeID: loginCtx.Membership.CooperativeID,
-		RoleCode:      loginCtx.Role.Code,
-	})
-	if err != nil {
-		return nil, appErrors.InternalServer("gagal membuat access token")
-	}
-
 	refreshToken, err := generateSecureToken(32)
 	if err != nil {
 		return nil, appErrors.InternalServer("gagal membuat refresh token")
@@ -458,6 +456,16 @@ func (s *AuthService) SetForgottenPIN(req model.ForgotPINSetPINRequest) (*model.
 		IPAddress:        req.IPAddress,
 		UserAgent:        req.UserAgent,
 		ExpiresAt:        time.Now().Add(loginRefreshTokenTTL),
+	}
+
+	accessToken, err := s.deps.jwtAuth.GenerateAccessToken(jwt.GenerateAccessTokenInput{
+		UserID:        loginCtx.User.UserID,
+		CooperativeID: loginCtx.Membership.CooperativeID,
+		SessionID:     session.SessionID,
+		RoleCode:      loginCtx.Role.Code,
+	})
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal membuat access token")
 	}
 
 	err = s.deps.repository.UserSessionRepository.CreateUserSession(tx, session)
@@ -490,4 +498,59 @@ func (s *AuthService) SetForgottenPIN(req model.ForgotPINSetPINRequest) (*model.
 		RoleCode:      loginCtx.Role.Code,
 		MemberID:      memberID,
 	}, nil
+}
+
+func (s *AuthService) Logout(req model.LogoutRequest) (*model.LogoutResponse, error) {
+	if req.UserID == uuid.Nil || req.SessionID == uuid.Nil {
+		return nil, appErrors.Unauthorized("akses tidak valid")
+	}
+
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	now := time.Now()
+	session, err := s.deps.repository.UserSessionRepository.GetActiveUserSession(tx, req.UserID, req.SessionID, now)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.Unauthorized("session tidak valid")
+		}
+		return nil, appErrors.InternalServer("gagal mengambil session")
+	}
+
+	session.RevokedAt = &now
+	if err := s.deps.repository.UserSessionRepository.UpdateUserSession(tx, session); err != nil {
+		return nil, appErrors.InternalServer("gagal logout")
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, appErrors.InternalServer("gagal logout")
+	}
+
+	return &model.LogoutResponse{
+		SessionID: session.SessionID,
+		RevokedAt: now,
+	}, nil
+}
+
+func (s *AuthService) ValidateAuthenticatedSession(auth model.AuthContext) error {
+	if auth.UserID == uuid.Nil || auth.SessionID == uuid.Nil {
+		return appErrors.Unauthorized("akses tidak valid")
+	}
+
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	_, err := s.deps.repository.UserSessionRepository.GetActiveUserSession(tx, auth.UserID, auth.SessionID, time.Now())
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return appErrors.Unauthorized("session tidak valid")
+		}
+		return appErrors.InternalServer("gagal memvalidasi session")
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return appErrors.InternalServer("gagal memvalidasi session")
+	}
+
+	return nil
 }

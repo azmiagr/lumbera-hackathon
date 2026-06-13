@@ -104,6 +104,52 @@ func (r *Rest) CreateLoanTransaction(c *gin.Context) {
 	response.Success(c, http.StatusCreated, "success to create loan transaction", result)
 }
 
+func (r *Rest) CreateInstallmentTransaction(c *gin.Context) {
+	authContext, ok := getAuthContext(c)
+	if !ok {
+		return
+	}
+
+	var req model.CreateInstallmentTransactionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
+		return
+	}
+
+	req.AuthContext = authContext
+
+	result, err := r.service.TransactionService.CreateInstallmentTransaction(req)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "success to create installment transaction", result)
+}
+
+func (r *Rest) CreateCashWithdrawalTransaction(c *gin.Context) {
+	authContext, ok := getAuthContext(c)
+	if !ok {
+		return
+	}
+
+	var req model.CreateCashWithdrawalTransactionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
+		return
+	}
+
+	req.AuthContext = authContext
+
+	result, err := r.service.TransactionService.CreateCashWithdrawalTransaction(req)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "success to create cash withdrawal transaction", result)
+}
+
 func getAuthContext(c *gin.Context) (model.AuthContext, bool) {
 	value, exists := c.Get("auth_claims")
 	if !exists {
@@ -120,6 +166,7 @@ func getAuthContext(c *gin.Context) (model.AuthContext, bool) {
 	return model.AuthContext{
 		UserID:        claims.UserID,
 		CooperativeID: claims.CooperativeID,
+		SessionID:     claims.SessionID,
 		RoleCode:      claims.RoleCode,
 	}, true
 }
