@@ -11,12 +11,22 @@ import (
 
 type IMCSRepository interface {
 	GetLatestTrainingFeatures(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (map[string]any, error)
+	GetLatestScoreSnapshot(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*entity.MCSScoreSnapshot, error)
+	GetLatestFiveCScores(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*MCSFiveCScoreRow, error)
 	CreateScoreSnapshot(tx *gorm.DB, snapshot *entity.MCSScoreSnapshot) error
 	UpdateMemberCurrentScore(tx *gorm.DB, memberID uuid.UUID, score int, grade string, updatedAt time.Time) error
 }
 
 type MCSRepository struct {
 	db *gorm.DB
+}
+
+type MCSFiveCScoreRow struct {
+	CharacterScore  *float64
+	CapacityScore   *float64
+	CapitalScore    *float64
+	ConditionsScore *float64
+	CollateralScore *float64
 }
 
 var mcsScoringFeatureColumns = []string{
@@ -63,6 +73,45 @@ func (r *MCSRepository) GetLatestTrainingFeatures(tx *gorm.DB, cooperativeID uui
 	}
 
 	return normalizeFeatureMap(row), nil
+}
+
+func (r *MCSRepository) GetLatestScoreSnapshot(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*entity.MCSScoreSnapshot, error) {
+	var snapshot entity.MCSScoreSnapshot
+	err := tx.Debug().
+		Where("cooperative_id = ?", cooperativeID).
+		Where("member_id = ?", memberID).
+		Where("calculation_status = ?", "COMPLETE").
+		Order("calculated_at DESC").
+		First(&snapshot).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &snapshot, nil
+}
+
+func (r *MCSRepository) GetLatestFiveCScores(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*MCSFiveCScoreRow, error) {
+	var result MCSFiveCScoreRow
+	err := tx.Debug().
+		Table("mcs_training_samples").
+		Select(`
+			character_score_rule AS character_score,
+			capacity_score_rule AS capacity_score,
+			capital_score_rule AS capital_score,
+			conditions_score_rule AS conditions_score,
+			collateral_score_rule AS collateral_score
+		`).
+		Where("cooperative_id = ?", cooperativeID).
+		Where("member_id = ?", memberID).
+		Where("sample_status IN ?", []string{"READY", "LABEL_PENDING", "DRAFT"}).
+		Order("observation_end_date DESC").
+		Limit(1).
+		Scan(&result).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
 }
 
 func (r *MCSRepository) CreateScoreSnapshot(tx *gorm.DB, snapshot *entity.MCSScoreSnapshot) error {

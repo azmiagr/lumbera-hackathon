@@ -38,7 +38,9 @@ type Partner struct {
 	UpdatedAt              time.Time      `json:"updated_at" gorm:"autoUpdateTime"`
 	DeletedAt              gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 
-	PartnerUsers []PartnerUser `json:"partner_users" gorm:"foreignKey:PartnerID;constraint:onDelete:CASCADE"`
+	MemberDataConsents   []MemberDataConsent   `json:"member_data_consents" gorm:"foreignKey:PartnerID;constraint:onDelete:CASCADE"`
+	CreditAccessRequests []CreditAccessRequest `json:"credit_access_requests" gorm:"foreignKey:PartnerID;constraint:onDelete:CASCADE"`
+	PartnerUsers         []PartnerUser         `json:"partner_users" gorm:"foreignKey:PartnerID;constraint:onDelete:CASCADE"`
 }
 
 type PartnerUser struct {
