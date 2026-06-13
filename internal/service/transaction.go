@@ -22,6 +22,7 @@ type ITransactionService interface {
 	SearchTransactionMembers(req model.SearchTransactionMembersRequest) ([]model.TransactionMemberResponse, error)
 	CreateSavingsTransaction(req model.CreateSavingsTransactionRequest) (*model.TransactionResponse, error)
 	ListTransactions(req model.ListTransactionsRequest) (*model.ListTransactionsResponse, error)
+	CreateLoanTransaction(req model.CreateLoanTransactionRequest) (*model.TransactionResponse, error)
 }
 
 type TransactionService struct {
@@ -202,6 +203,135 @@ func (s *TransactionService) ListTransactions(req model.ListTransactionsRequest)
 		Limit: req.Limit,
 		Total: total,
 	}, nil
+}
+
+func (s *TransactionService) CreateLoanTransaction(req model.CreateLoanTransactionRequest) (*model.TransactionResponse, error) {
+	if req.UserID == uuid.Nil || req.CooperativeID == uuid.Nil {
+		return nil, appErrors.Unauthorized("akses tidak valid")
+	}
+
+	if req.RoleCode != constants.RoleCodePengurusKoperasi {
+		return nil, appErrors.Forbidden("hanya pengurus koperasi yang dapat mencatat transaksi")
+	}
+
+	if req.MemberID == uuid.Nil {
+		return nil, appErrors.BadRequest("anggota wajib dipilih")
+	}
+
+	if req.Amount <= 0 {
+		return nil, appErrors.BadRequest("nominal pinjaman wajib lebih dari 0")
+	}
+
+	recordedAt := time.Now()
+	if req.RecordedAt != nil {
+		recordedAt = *req.RecordedAt
+	}
+
+	now := time.Now()
+	clientTransactionID := strings.TrimSpace(req.ClientTransactionID)
+
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	if clientTransactionID != "" {
+		existingTransaction, err := s.deps.repository.TransactionRepository.GetTransactionByClientID(tx, req.CooperativeID, clientTransactionID)
+		if err == nil {
+			detail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, req.CooperativeID, existingTransaction.TransactionID)
+			if err != nil {
+				return nil, appErrors.InternalServer("gagal mengambil detail transaksi")
+			}
+
+			summary, err := s.deps.repository.TransactionRepository.GetMemberTransactionSummary(tx, req.CooperativeID, existingTransaction.MemberID)
+			if err != nil {
+				return nil, appErrors.InternalServer("gagal mengambil ringkasan anggota")
+			}
+
+			if err := tx.Commit().Error; err != nil {
+				return nil, appErrors.InternalServer("gagal mengambil transaksi")
+			}
+
+			return mapDetailedTransactionResponseWithSummary(detail, existingTransaction.PrevHash, summary), nil
+		}
+
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.InternalServer("gagal memeriksa transaksi duplikat")
+		}
+	}
+
+	_, err := s.deps.repository.MemberRepository.GetActiveMember(tx, req.CooperativeID, req.MemberID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.NotFound("anggota aktif tidak ditemukan")
+		}
+		return nil, appErrors.InternalServer("gagal memvalidasi anggota")
+	}
+
+	summary, err := s.deps.repository.TransactionRepository.GetMemberTransactionSummary(tx, req.CooperativeID, req.MemberID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil ringkasan anggota")
+	}
+
+	financialConfig, err := s.deps.repository.FinancialConfigurationRepository.GetFinancialConfiguration(tx, model.GetFinancialConfigurationParam{
+		CooperativeID: req.CooperativeID,
+	})
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, appErrors.InternalServer("gagal mengambil konfigurasi pinjaman")
+	}
+	if financialConfig != nil && financialConfig.MaxLoanAmountPerMember > 0 && summary.LoanOutstanding+req.Amount > financialConfig.MaxLoanAmountPerMember {
+		return nil, appErrors.BadRequest("nominal pinjaman melebihi batas pinjaman anggota")
+	}
+
+	prevHash := genesisTransactionHash
+	latestTransaction, err := s.deps.repository.TransactionRepository.GetLatestTransactionForUpdate(tx, req.CooperativeID)
+	if err == nil {
+		prevHash = latestTransaction.CurrentHash
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, appErrors.InternalServer("gagal mengambil transaksi terakhir")
+	}
+
+	transaction := &entity.Transaction{
+		TransactionID:       uuid.New(),
+		CooperativeID:       req.CooperativeID,
+		MemberID:            req.MemberID,
+		OfficerID:           req.UserID,
+		TransactionType:     constants.TransactionTypeLoan,
+		Amount:              req.Amount,
+		Description:         strings.TrimSpace(req.Description),
+		RecordedAt:          recordedAt,
+		SyncedAt:            &now,
+		PrevHash:            prevHash,
+		IsOfflineCreated:    req.IsOfflineCreated,
+		ClientTransactionID: clientTransactionID,
+	}
+	transaction.CurrentHash = buildTransactionHash(transaction)
+
+	err = s.deps.repository.TransactionRepository.CreateTransaction(tx, transaction)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan transaksi pinjaman")
+	}
+
+	detail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, req.CooperativeID, transaction.TransactionID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil detail transaksi")
+	}
+
+	summary.LoanOutstanding += req.Amount
+
+	err = tx.Commit().Error
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan transaksi pinjaman")
+	}
+
+	return mapDetailedTransactionResponseWithSummary(detail, transaction.PrevHash, summary), nil
+}
+
+func mapDetailedTransactionResponseWithSummary(item *model.TransactionListItemResponse, prevHash string, summary *model.TransactionMemberSummaryResponse) *model.TransactionResponse {
+	response := mapDetailedTransactionResponse(item, prevHash)
+	if summary != nil {
+		response.MemberSavingsBalance = summary.SavingsBalance
+		response.MemberLoanOutstanding = summary.LoanOutstanding
+	}
+	return response
 }
 
 func mapSavingsType(savingsType string) (string, error) {

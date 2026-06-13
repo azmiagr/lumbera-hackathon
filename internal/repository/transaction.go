@@ -17,6 +17,7 @@ type ITransactionRepository interface {
 	GetTransactionByClientID(tx *gorm.DB, cooperativeID uuid.UUID, clientTransactionID string) (*entity.Transaction, error)
 	GetTransactionDetail(tx *gorm.DB, cooperativeID uuid.UUID, transactionID uuid.UUID) (*model.TransactionListItemResponse, error)
 	ListTransactions(tx *gorm.DB, req model.ListTransactionsRequest) ([]model.TransactionListItemResponse, int64, error)
+	GetMemberTransactionSummary(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*model.TransactionMemberSummaryResponse, error)
 }
 
 type TransactionRepository struct {
@@ -125,6 +126,41 @@ func (r *TransactionRepository) ListTransactions(tx *gorm.DB, req model.ListTran
 	}
 
 	return results, total, nil
+}
+
+func (r *TransactionRepository) GetMemberTransactionSummary(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*model.TransactionMemberSummaryResponse, error) {
+	var result model.TransactionMemberSummaryResponse
+
+	err := tx.Debug().
+		Table("transactions").
+		Select(`
+            COALESCE(SUM(CASE
+                WHEN transaction_type IN ? THEN amount
+                ELSE 0
+            END), 0) AS savings_balance,
+            COALESCE(SUM(CASE
+                WHEN transaction_type = ? THEN amount
+                WHEN transaction_type = ? THEN -amount
+                ELSE 0
+            END), 0) AS loan_outstanding
+        `,
+			[]string{
+				constants.TransactionTypeSavingsPrincipal,
+				constants.TransactionTypeSavingsMandatory,
+				constants.TransactionTypeSavingsVoluntary,
+			},
+			constants.TransactionTypeLoan,
+			constants.TransactionTypeInstallment,
+		).
+		Where("cooperative_id = ?", cooperativeID).
+		Where("member_id = ?", memberID).
+		Scan(&result).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
 }
 
 func baseTransactionListQuery(tx *gorm.DB) *gorm.DB {
