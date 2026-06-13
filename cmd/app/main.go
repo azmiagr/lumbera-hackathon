@@ -10,8 +10,8 @@ import (
 	"github.com/azmiagr/lumbera-hackathon/pkg/config"
 	"github.com/azmiagr/lumbera-hackathon/pkg/database/mariadb"
 	"github.com/azmiagr/lumbera-hackathon/pkg/jwt"
+	"github.com/azmiagr/lumbera-hackathon/pkg/mcsapi"
 	"github.com/azmiagr/lumbera-hackathon/pkg/middleware"
-	"github.com/azmiagr/lumbera-hackathon/pkg/n8n"
 	"github.com/azmiagr/lumbera-hackathon/pkg/supabase"
 	"github.com/azmiagr/lumbera-hackathon/pkg/whatsapp"
 )
@@ -34,8 +34,8 @@ func main() {
 	jwt := jwt.Init()
 	whatsapp := whatsapp.Init()
 	supabase := supabase.Init()
-	n8nClient := n8n.Init()
-	svc := service.NewService(repo, bcrypt, jwt, whatsapp, supabase, n8nClient)
+	mcsAPI := mcsapi.Init()
+	svc := service.NewService(repo, bcrypt, jwt, whatsapp, supabase, mcsAPI)
 
 	middleware := middleware.Init(svc, jwt)
 	r := rest.NewRest(svc, middleware)

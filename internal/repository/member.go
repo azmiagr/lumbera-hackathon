@@ -17,6 +17,9 @@ type IMemberRepository interface {
 	CountMembersByCooperative(tx *gorm.DB, cooperativeID uuid.UUID) (int64, error)
 	CreateMember(tx *gorm.DB, member *entity.Member) error
 	CountActiveMembersByCooperative(tx *gorm.DB, cooperativeID uuid.UUID) (int64, error)
+	GetDashboardProfile(tx *gorm.DB, userID uuid.UUID, cooperativeID uuid.UUID) (*model.MemberDashboardProfile, error)
+	GetDashboardSavings(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*model.MemberDashboardSavings, error)
+	ListRecentMemberTransactions(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID, limit int) ([]model.MemberDashboardTransaction, error)
 }
 
 type MemberRepository struct {
@@ -210,4 +213,99 @@ func (r *MemberRepository) CountActiveMembersByCooperative(tx *gorm.DB, cooperat
 	}
 
 	return total, nil
+}
+
+func (r *MemberRepository) GetDashboardProfile(tx *gorm.DB, userID uuid.UUID, cooperativeID uuid.UUID) (*model.MemberDashboardProfile, error) {
+	var result model.MemberDashboardProfile
+
+	err := tx.Debug().
+		Table("members").
+		Select(`
+			members.member_id,
+			members.user_id,
+			users.full_name,
+			members.member_number,
+			members.cooperative_id,
+			cooperatives.name AS cooperative_name
+		`).
+		Joins("JOIN users ON users.user_id = members.user_id").
+		Joins("JOIN cooperatives ON cooperatives.cooperative_id = members.cooperative_id").
+		Joins("JOIN user_cooperative_memberships ON user_cooperative_memberships.member_id = members.member_id").
+		Joins("JOIN roles ON roles.role_id = user_cooperative_memberships.role_id").
+		Where("members.user_id = ?", userID).
+		Where("members.cooperative_id = ?", cooperativeID).
+		Where("members.member_status = ?", "ACTIVE").
+		Where("user_cooperative_memberships.status = ?", "ACTIVE").
+		Where("roles.code = ?", constants.RoleCodeAnggota).
+		First(&result).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (r *MemberRepository) GetDashboardSavings(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*model.MemberDashboardSavings, error) {
+	var result model.MemberDashboardSavings
+
+	err := tx.Debug().
+		Table("transactions").
+		Select(`
+			COALESCE(SUM(CASE WHEN transaction_type = ? THEN amount ELSE 0 END), 0) AS principal_balance,
+			COALESCE(SUM(CASE WHEN transaction_type = ? THEN amount ELSE 0 END), 0) AS mandatory_balance,
+			COALESCE(SUM(CASE WHEN transaction_type = ? THEN amount ELSE 0 END), 0) AS voluntary_balance,
+			COALESCE(SUM(CASE WHEN transaction_type = ? THEN amount ELSE 0 END), 0) AS cash_withdrawal_total,
+			COALESCE(SUM(CASE
+				WHEN transaction_type IN ? THEN amount
+				WHEN transaction_type = ? THEN -amount
+				ELSE 0
+			END), 0) AS total_balance
+		`,
+			constants.TransactionTypeSavingsPrincipal,
+			constants.TransactionTypeSavingsMandatory,
+			constants.TransactionTypeSavingsVoluntary,
+			constants.TransactionTypeCashWithdrawal,
+			[]string{
+				constants.TransactionTypeSavingsPrincipal,
+				constants.TransactionTypeSavingsMandatory,
+				constants.TransactionTypeSavingsVoluntary,
+			},
+			constants.TransactionTypeCashWithdrawal,
+		).
+		Where("cooperative_id = ?", cooperativeID).
+		Where("member_id = ?", memberID).
+		Scan(&result).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (r *MemberRepository) ListRecentMemberTransactions(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID, limit int) ([]model.MemberDashboardTransaction, error) {
+	var results []model.MemberDashboardTransaction
+
+	if limit <= 0 || limit > 20 {
+		limit = 6
+	}
+
+	err := tx.Debug().
+		Table("transactions").
+		Select(`
+			transaction_id,
+			transaction_type,
+			amount,
+			description,
+			recorded_at
+		`).
+		Where("cooperative_id = ?", cooperativeID).
+		Where("member_id = ?", memberID).
+		Order("recorded_at DESC").
+		Limit(limit).
+		Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }
