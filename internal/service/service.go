@@ -24,6 +24,8 @@ type Service struct {
 	LoanDashboardService       ILoanDashboardService
 	LoanApplicationService     ILoanApplicationService
 	CreditAccessService        ICreditAccessService
+	StoreService               IStoreService
+	LedgerService              ILedgerService
 }
 
 type serviceDependency struct {
@@ -60,5 +62,7 @@ func NewService(repository *repository.Repository, bcrypt bcrypt.Interface, jwtA
 		LoanDashboardService:       NewLoanDashboardService(deps),
 		LoanApplicationService:     NewLoanApplicationService(deps),
 		CreditAccessService:        NewCreditAccessService(deps),
+		StoreService:               NewStoreService(deps),
+		LedgerService:              NewLedgerService(deps),
 	}
 }

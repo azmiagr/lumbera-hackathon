@@ -17,10 +17,14 @@ type ILoanRepository interface {
 	GetActiveLoanByMemberForUpdate(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*entity.LoanAccount, error)
 	GetLoanByIDForUpdate(tx *gorm.DB, cooperativeID uuid.UUID, loanID uuid.UUID) (*entity.LoanAccount, error)
 	GetLoanByDisbursementTransactionID(tx *gorm.DB, transactionID uuid.UUID) (*entity.LoanAccount, error)
+	GetLoanByDisbursementTransactionIDForUpdate(tx *gorm.DB, transactionID uuid.UUID) (*entity.LoanAccount, error)
+	CountPaymentAllocationsByLoanID(tx *gorm.DB, loanID uuid.UUID) (int64, error)
 	ListPayableSchedulesForUpdate(tx *gorm.DB, loanID uuid.UUID) ([]entity.LoanInstallmentSchedule, error)
 	CreateLoanPaymentAllocation(tx *gorm.DB, allocation *entity.LoanPaymentAllocation) error
+	CreateLoanPaymentAllocations(tx *gorm.DB, allocations []entity.LoanPaymentAllocation) error
 	ListPaymentAllocationsByTransaction(tx *gorm.DB, transactionID uuid.UUID) ([]entity.LoanPaymentAllocation, error)
 	ListSchedulesByIDs(tx *gorm.DB, scheduleIDs []uuid.UUID) ([]entity.LoanInstallmentSchedule, error)
+	ListSchedulesByIDsForUpdate(tx *gorm.DB, scheduleIDs []uuid.UUID) ([]entity.LoanInstallmentSchedule, error)
 	UpdateLoanSchedule(tx *gorm.DB, schedule *entity.LoanInstallmentSchedule) error
 	UpdateLoanAccount(tx *gorm.DB, loan *entity.LoanAccount) error
 	GetLoanSummary(tx *gorm.DB, loanID uuid.UUID, asOf time.Time) (*model.LoanSummaryResponse, error)
@@ -98,6 +102,28 @@ func (r *LoanRepository) GetLoanByDisbursementTransactionID(tx *gorm.DB, transac
 	return &loan, nil
 }
 
+func (r *LoanRepository) GetLoanByDisbursementTransactionIDForUpdate(tx *gorm.DB, transactionID uuid.UUID) (*entity.LoanAccount, error) {
+	var loan entity.LoanAccount
+	err := tx.Debug().
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("disbursement_transaction_id = ?", transactionID).
+		First(&loan).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &loan, nil
+}
+
+func (r *LoanRepository) CountPaymentAllocationsByLoanID(tx *gorm.DB, loanID uuid.UUID) (int64, error) {
+	var total int64
+	err := tx.Debug().
+		Model(&entity.LoanPaymentAllocation{}).
+		Where("loan_id = ?", loanID).
+		Count(&total).Error
+	return total, err
+}
+
 func (r *LoanRepository) ListPayableSchedulesForUpdate(tx *gorm.DB, loanID uuid.UUID) ([]entity.LoanInstallmentSchedule, error) {
 	var schedules []entity.LoanInstallmentSchedule
 	err := tx.Debug().
@@ -115,6 +141,19 @@ func (r *LoanRepository) ListPayableSchedulesForUpdate(tx *gorm.DB, loanID uuid.
 
 func (r *LoanRepository) CreateLoanPaymentAllocation(tx *gorm.DB, allocation *entity.LoanPaymentAllocation) error {
 	err := tx.Debug().Create(allocation).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *LoanRepository) CreateLoanPaymentAllocations(tx *gorm.DB, allocations []entity.LoanPaymentAllocation) error {
+	if len(allocations) == 0 {
+		return nil
+	}
+
+	err := tx.Debug().Create(&allocations).Error
 	if err != nil {
 		return err
 	}
@@ -142,6 +181,24 @@ func (r *LoanRepository) ListSchedulesByIDs(tx *gorm.DB, scheduleIDs []uuid.UUID
 
 	var schedules []entity.LoanInstallmentSchedule
 	err := tx.Debug().
+		Where("schedule_id IN ?", scheduleIDs).
+		Order("installment_no ASC").
+		Find(&schedules).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return schedules, nil
+}
+
+func (r *LoanRepository) ListSchedulesByIDsForUpdate(tx *gorm.DB, scheduleIDs []uuid.UUID) ([]entity.LoanInstallmentSchedule, error) {
+	if len(scheduleIDs) == 0 {
+		return []entity.LoanInstallmentSchedule{}, nil
+	}
+
+	var schedules []entity.LoanInstallmentSchedule
+	err := tx.Debug().
+		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("schedule_id IN ?", scheduleIDs).
 		Order("installment_no ASC").
 		Find(&schedules).Error

@@ -25,6 +25,8 @@ type Repository struct {
 	LoanDashboardRepository             ILoanDashboardRepository
 	LoanApplicationRepository           ILoanApplicationRepository
 	CreditAccessRepository              ICreditAccessRepository
+	StoreRepository                     IStoreRepository
+	LedgerRepository                    ILedgerRepository
 }
 
 func NewRepository(db *gorm.DB) *Repository {
@@ -51,5 +53,7 @@ func NewRepository(db *gorm.DB) *Repository {
 		LoanDashboardRepository:             NewLoanDashboardRepository(db),
 		LoanApplicationRepository:           NewLoanApplicationRepository(db),
 		CreditAccessRepository:              NewCreditAccessRepository(db),
+		StoreRepository:                     NewStoreRepository(db),
+		LedgerRepository:                    NewLedgerRepository(db),
 	}
 }

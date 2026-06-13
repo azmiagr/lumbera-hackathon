@@ -40,6 +40,12 @@ func Migrate(db *gorm.DB) error {
 		&entity.MemberImportBatch{},
 		&entity.MemberImportRow{},
 		&entity.MCSScoreSnapshot{},
+		&entity.StoreProduct{},
+		&entity.StockMovement{},
+		&entity.StoreSale{},
+		&entity.StoreSaleItem{},
+		&entity.LedgerAnchor{},
+		&entity.TransactionReversal{},
 	)
 
 	if err != nil {

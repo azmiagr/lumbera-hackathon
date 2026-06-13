@@ -16,6 +16,11 @@ type Cooperative struct {
 	BankAccountHolderName string    `json:"bank_account_holder_name" gorm:"type:varchar(255);not null"`
 
 	FinancialConfiguration     *FinancialConfiguration     `json:"financial_configuration" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
+	TransactionReversals       []TransactionReversal       `json:"transaction_reversals" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
+	LedgerAnchors              []LedgerAnchor              `json:"ledger_anchors" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
+	StoreProducts              []StoreProduct              `json:"store_products" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
+	StockMovements             []StockMovement             `json:"stock_movements" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
+	StoreSales                 []StoreSale                 `json:"store_sales" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 	MemberDataConsents         []MemberDataConsent         `json:"member_data_consents" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 	CreditAccessRequests       []CreditAccessRequest       `json:"credit_access_requests" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`
 	LoanApplications           []LoanApplication           `json:"loan_applications" gorm:"foreignKey:CooperativeID;constraint:onDelete:CASCADE"`

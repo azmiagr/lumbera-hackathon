@@ -63,7 +63,8 @@ func (r *Rest) GrantCreditAccess(c *gin.Context) {
 	}
 
 	var req model.GrantCreditAccessRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err = c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
 		return
 	}

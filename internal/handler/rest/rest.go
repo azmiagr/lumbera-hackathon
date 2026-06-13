@@ -61,6 +61,7 @@ func (r *Rest) MountEndpoint() {
 	transactions.POST("/loans", r.CreateLoanTransaction)
 	transactions.POST("/installments", r.CreateInstallmentTransaction)
 	transactions.POST("/cash-withdrawals", r.CreateCashWithdrawalTransaction)
+	transactions.POST("/:transactionID/reverse", r.ReverseTransaction)
 
 	members := baseURL.Group("/members")
 	members.Use(r.middleware.AuthenticateUser())
@@ -73,6 +74,25 @@ func (r *Rest) MountEndpoint() {
 	members.PATCH("/imports/:batchID/rows/:rowID", r.UpdateMemberImportRow)
 	members.DELETE("/imports/:batchID/rows/:rowID", r.DeleteMemberImportRow)
 	members.POST("/imports/:batchID/submit", r.SubmitMemberImport)
+
+	store := baseURL.Group("/store")
+	store.Use(r.middleware.AuthenticateUser())
+	store.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
+	store.GET("/dashboard", r.GetStoreDashboard)
+	store.GET("/products", r.ListStoreProducts)
+	store.POST("/products", r.CreateStoreProduct)
+	store.GET("/products/:productID", r.GetStoreProduct)
+	store.POST("/products/:productID/stock-in", r.CreateStockIn)
+	store.POST("/products/:productID/adjustments", r.CreateStockAdjustment)
+	store.GET("/movements", r.ListStockMovements)
+	store.POST("/sales", r.CreateStoreSale)
+	store.GET("/sales/:saleID", r.GetStoreSale)
+
+	ledger := baseURL.Group("/ledger")
+	ledger.Use(r.middleware.AuthenticateUser())
+	ledger.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
+	ledger.GET("/audit", r.GetLedgerAudit)
+	ledger.POST("/anchors", r.AnchorLedger)
 
 	cooperativeMember := baseURL.Group("/cooperative-members")
 	cooperativeMember.Use(r.middleware.AuthenticateUser())

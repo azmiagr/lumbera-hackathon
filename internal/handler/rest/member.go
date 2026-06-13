@@ -17,7 +17,8 @@ func (r *Rest) ListMembers(c *gin.Context) {
 	}
 
 	var req model.ListMembersRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	err := c.ShouldBindQuery(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind query", err)
 		return
 	}
@@ -40,7 +41,8 @@ func (r *Rest) CreateMember(c *gin.Context) {
 	}
 
 	var req model.CreateMemberRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
 		return
 	}
@@ -95,7 +97,8 @@ func (r *Rest) GetMemberImport(c *gin.Context) {
 	}
 
 	var req model.GetMemberImportRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	err = c.ShouldBindQuery(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind query", err)
 		return
 	}
@@ -131,7 +134,8 @@ func (r *Rest) UpdateMemberImportRow(c *gin.Context) {
 	}
 
 	var req model.UpdateMemberImportRowRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err = c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
 		return
 	}
@@ -231,7 +235,8 @@ func (r *Rest) GetMemberDashboard(c *gin.Context) {
 	}
 
 	var req model.GetMemberDashboardRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	err := c.ShouldBindQuery(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind query", err)
 		return
 	}

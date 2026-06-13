@@ -33,7 +33,8 @@ func (r *Rest) CreateLoanApplication(c *gin.Context) {
 	}
 
 	var req model.CreateLoanApplicationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
 		return
 	}

@@ -95,7 +95,8 @@ func (r *Rest) GetDashboardSummary(c *gin.Context) {
 	}
 
 	var req model.DashboardSummaryRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	err := c.ShouldBindQuery(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind query", err)
 		return
 	}
