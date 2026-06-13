@@ -278,8 +278,6 @@ push      = kirim antrean offline ke database server
 status    = recovery status berdasarkan client id lokal
 ```
 
-Panduan detail frontend tersedia di [docs/LUMBERA-OFFLINE-SYNC-FRONTEND.md](docs/LUMBERA-OFFLINE-SYNC-FRONTEND.md).
-
 ## Endpoint Groups
 
 Route utama berada di bawah prefix:
