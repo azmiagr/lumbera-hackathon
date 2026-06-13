@@ -223,3 +223,26 @@ func (r *Rest) DownloadMemberImportTemplate(c *gin.Context) {
 		fileBytes,
 	)
 }
+
+func (r *Rest) GetMemberDashboard(c *gin.Context) {
+	authContext, ok := getAuthContext(c)
+	if !ok {
+		return
+	}
+
+	var req model.GetMemberDashboardRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to bind query", err)
+		return
+	}
+
+	req.AuthContext = authContext
+
+	result, err := r.service.MemberDashboardService.GetDashboard(req)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "success to get member dashboard", result)
+}

@@ -73,7 +73,14 @@ func (r *Rest) MountEndpoint() {
 	members.PATCH("/imports/:batchID/rows/:rowID", r.UpdateMemberImportRow)
 	members.DELETE("/imports/:batchID/rows/:rowID", r.DeleteMemberImportRow)
 	members.POST("/imports/:batchID/submit", r.SubmitMemberImport)
-	members.POST("/:memberID/mcs/run", r.TriggerMemberMCS)
+
+	cooperativeMember := baseURL.Group("/cooperative-members")
+	cooperativeMember.Use(r.middleware.AuthenticateUser())
+	cooperativeMember.GET("/dashboard", r.GetMemberDashboard)
+	cooperativeMember.GET("/savings-book", r.GetSavingsBook)
+	cooperativeMember.GET("/savings-book/export", r.ExportSavingsBookXLSX)
+	cooperativeMember.POST("/:memberID/mcs/run", r.TriggerMemberMCS)
+	cooperativeMember.GET("/savings-book/export/pdf", r.ExportSavingsBookPDF)
 
 	internal := baseURL.Group("/internal")
 	internal.PATCH("/mcs/callback", r.ApplyMCSCallback)

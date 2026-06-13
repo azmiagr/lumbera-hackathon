@@ -7,7 +7,6 @@ import (
 
 	"github.com/azmiagr/lumbera-hackathon/entity"
 	"github.com/azmiagr/lumbera-hackathon/model"
-	constants "github.com/azmiagr/lumbera-hackathon/pkg/constant"
 	appErrors "github.com/azmiagr/lumbera-hackathon/pkg/errors"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -31,10 +30,6 @@ func NewMCSService(deps serviceDependency) IMCSService {
 func (s *MCSService) TriggerMemberMCS(req model.TriggerMemberMCSRequest) (*model.TriggerMemberMCSResponse, error) {
 	if req.UserID == uuid.Nil || req.CooperativeID == uuid.Nil {
 		return nil, appErrors.Unauthorized("akses tidak valid")
-	}
-
-	if req.RoleCode != constants.RoleCodePengurusKoperasi {
-		return nil, appErrors.Forbidden("hanya pengurus koperasi yang dapat menjalankan MCS")
 	}
 
 	if req.MemberID == uuid.Nil {
@@ -62,11 +57,11 @@ func (s *MCSService) TriggerMemberMCS(req model.TriggerMemberMCSRequest) (*model
 
 	requestID := uuid.New()
 	payload["request_id"] = requestID
-	payload["model_version"] = mcsXGBoostModelVersion
+	payload["member_id"] = req.MemberID
 
-	err = s.deps.n8n.SendMCSRequest(payload)
+	err = s.deps.mcsAPI.SendMCSRequest(payload)
 	if err != nil {
-		return nil, appErrors.InternalServer("gagal mengirim request MCS ke n8n")
+		return nil, appErrors.InternalServer("gagal mengirim request MCS ke API scoring")
 	}
 
 	err = tx.Commit().Error
