@@ -75,6 +75,10 @@ func (r *Rest) MountEndpoint() {
 	members.DELETE("/imports/:batchID/rows/:rowID", r.DeleteMemberImportRow)
 	members.POST("/imports/:batchID/submit", r.SubmitMemberImport)
 
+	profile := baseURL.Group("/profile")
+	profile.Use(r.middleware.AuthenticateUser())
+	profile.GET("", r.GetProfile)
+
 	store := baseURL.Group("/store")
 	store.Use(r.middleware.AuthenticateUser())
 	store.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
