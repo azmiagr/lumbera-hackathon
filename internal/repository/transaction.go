@@ -18,6 +18,10 @@ type ITransactionRepository interface {
 	GetTransactionDetail(tx *gorm.DB, cooperativeID uuid.UUID, transactionID uuid.UUID) (*model.TransactionListItemResponse, error)
 	ListTransactions(tx *gorm.DB, req model.ListTransactionsRequest) ([]model.TransactionListItemResponse, int64, error)
 	GetMemberTransactionSummary(tx *gorm.DB, cooperativeID uuid.UUID, memberID uuid.UUID) (*model.TransactionMemberSummaryResponse, error)
+	GetTransactionForUpdate(tx *gorm.DB, cooperativeID, transactionID uuid.UUID) (*entity.Transaction, error)
+	GetReversalByOriginalTransactionID(tx *gorm.DB, cooperativeID, transactionID uuid.UUID) (*entity.TransactionReversal, error)
+	GetReversalByReversalTransactionID(tx *gorm.DB, cooperativeID, transactionID uuid.UUID) (*entity.TransactionReversal, error)
+	CreateTransactionReversal(tx *gorm.DB, reversal *entity.TransactionReversal) error
 }
 
 type TransactionRepository struct {
@@ -165,6 +169,52 @@ func (r *TransactionRepository) GetMemberTransactionSummary(tx *gorm.DB, coopera
 	return &result, nil
 }
 
+func (r *TransactionRepository) GetTransactionForUpdate(tx *gorm.DB, cooperativeID, transactionID uuid.UUID) (*entity.Transaction, error) {
+	var transaction entity.Transaction
+	err := tx.Debug().
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("cooperative_id = ?", cooperativeID).
+		Where("transaction_id = ?", transactionID).
+		First(&transaction).Error
+	if err != nil {
+		return nil, err
+	}
+	return &transaction, nil
+}
+
+func (r *TransactionRepository) GetReversalByOriginalTransactionID(tx *gorm.DB, cooperativeID, transactionID uuid.UUID) (*entity.TransactionReversal, error) {
+	var reversal entity.TransactionReversal
+	err := tx.Debug().
+		Where("cooperative_id = ?", cooperativeID).
+		Where("original_transaction_id = ?", transactionID).
+		First(&reversal).Error
+	if err != nil {
+		return nil, err
+	}
+	return &reversal, nil
+}
+
+func (r *TransactionRepository) GetReversalByReversalTransactionID(tx *gorm.DB, cooperativeID, transactionID uuid.UUID) (*entity.TransactionReversal, error) {
+	var reversal entity.TransactionReversal
+	err := tx.Debug().
+		Where("cooperative_id = ?", cooperativeID).
+		Where("reversal_transaction_id = ?", transactionID).
+		First(&reversal).Error
+	if err != nil {
+		return nil, err
+	}
+	return &reversal, nil
+}
+
+func (r *TransactionRepository) CreateTransactionReversal(tx *gorm.DB, reversal *entity.TransactionReversal) error {
+	err := tx.Debug().Create(reversal).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func baseTransactionListQuery(tx *gorm.DB) *gorm.DB {
 	return tx.Debug().
 		Table("transactions").
@@ -184,11 +234,18 @@ func baseTransactionListQuery(tx *gorm.DB) *gorm.DB {
 			transactions.synced_at,
 			transactions.current_hash,
 			transactions.is_offline_created,
-			transactions.client_transaction_id
+			transactions.client_transaction_id,
+			CASE WHEN original_reversals.transaction_reversal_id IS NULL THEN false ELSE true END AS is_reversed,
+			CASE WHEN reversal_reversals.transaction_reversal_id IS NULL THEN false ELSE true END AS is_reversal,
+			reversal_reversals.original_transaction_id,
+			original_reversals.reversal_transaction_id,
+			COALESCE(original_reversals.reason, reversal_reversals.reason, '') AS reversal_reason
 		`).
 		Joins("JOIN members ON members.member_id = transactions.member_id").
 		Joins("JOIN users AS member_users ON member_users.user_id = members.user_id").
-		Joins("JOIN users AS officer_users ON officer_users.user_id = transactions.officer_id")
+		Joins("JOIN users AS officer_users ON officer_users.user_id = transactions.officer_id").
+		Joins("LEFT JOIN transaction_reversals AS original_reversals ON original_reversals.original_transaction_id = transactions.transaction_id").
+		Joins("LEFT JOIN transaction_reversals AS reversal_reversals ON reversal_reversals.reversal_transaction_id = transactions.transaction_id")
 }
 
 func applyTransactionTypeFilter(query *gorm.DB, transactionType string) *gorm.DB {

@@ -69,7 +69,8 @@ func (r *Rest) ExportSavingsBookPDF(c *gin.Context) {
 	}
 
 	var req model.ExportSavingsBookRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	err := c.ShouldBindQuery(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind query", err)
 		return
 	}

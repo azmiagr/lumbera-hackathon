@@ -7,6 +7,7 @@ import (
 	"github.com/azmiagr/lumbera-hackathon/pkg/jwt"
 	"github.com/azmiagr/lumbera-hackathon/pkg/response"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 func (r *Rest) SearchTransactionMembers(c *gin.Context) {
@@ -88,7 +89,8 @@ func (r *Rest) CreateLoanTransaction(c *gin.Context) {
 	}
 
 	var req model.CreateLoanTransactionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
 		return
 	}
@@ -111,7 +113,8 @@ func (r *Rest) CreateInstallmentTransaction(c *gin.Context) {
 	}
 
 	var req model.CreateInstallmentTransactionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
 		return
 	}
@@ -134,7 +137,8 @@ func (r *Rest) CreateCashWithdrawalTransaction(c *gin.Context) {
 	}
 
 	var req model.CreateCashWithdrawalTransactionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
 		return
 	}
@@ -148,6 +152,37 @@ func (r *Rest) CreateCashWithdrawalTransaction(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusCreated, "success to create cash withdrawal transaction", result)
+}
+
+func (r *Rest) ReverseTransaction(c *gin.Context) {
+	authContext, ok := getAuthContext(c)
+	if !ok {
+		return
+	}
+
+	transactionID, err := uuid.Parse(c.Param("transactionID"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid transaction id", err)
+		return
+	}
+
+	var req model.ReverseTransactionRequest
+	err = c.ShouldBindJSON(&req)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to bind input", err)
+		return
+	}
+
+	req.AuthContext = authContext
+	req.TransactionID = transactionID
+
+	result, err := r.service.TransactionService.ReverseTransaction(req)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "success to reverse transaction", result)
 }
 
 func getAuthContext(c *gin.Context) (model.AuthContext, bool) {

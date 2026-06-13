@@ -25,6 +25,7 @@ type ITransactionService interface {
 	CreateLoanTransaction(req model.CreateLoanTransactionRequest) (*model.TransactionResponse, error)
 	CreateInstallmentTransaction(req model.CreateInstallmentTransactionRequest) (*model.InstallmentTransactionResponse, error)
 	CreateCashWithdrawalTransaction(req model.CreateCashWithdrawalTransactionRequest) (*model.TransactionResponse, error)
+	ReverseTransaction(req model.ReverseTransactionRequest) (*model.TransactionReversalResponse, error)
 }
 
 type TransactionService struct {
@@ -659,6 +660,299 @@ func (s *TransactionService) CreateCashWithdrawalTransaction(req model.CreateCas
 	return mapDetailedTransactionResponseWithSummary(detail, transaction.PrevHash, summary), nil
 }
 
+func (s *TransactionService) ReverseTransaction(req model.ReverseTransactionRequest) (*model.TransactionReversalResponse, error) {
+	if req.UserID == uuid.Nil || req.CooperativeID == uuid.Nil {
+		return nil, appErrors.Unauthorized("akses tidak valid")
+	}
+
+	if req.RoleCode != constants.RoleCodePengurusKoperasi {
+		return nil, appErrors.Forbidden("hanya pengurus koperasi yang dapat membatalkan transaksi")
+	}
+
+	if req.TransactionID == uuid.Nil {
+		return nil, appErrors.BadRequest("transaksi wajib dipilih")
+	}
+
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		return nil, appErrors.BadRequest("alasan pembatalan wajib diisi")
+	}
+
+	recordedAt := time.Now()
+	if req.RecordedAt != nil {
+		recordedAt = *req.RecordedAt
+	}
+
+	clientTransactionID := strings.TrimSpace(req.ClientTransactionID)
+	if clientTransactionID == "" {
+		clientTransactionID = "REV-" + req.TransactionID.String()
+	}
+
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	original, err := s.deps.repository.TransactionRepository.GetTransactionForUpdate(tx, req.CooperativeID, req.TransactionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.NotFound("transaksi tidak ditemukan")
+		}
+		return nil, appErrors.InternalServer("gagal mengambil transaksi")
+	}
+
+	existingReversal, err := s.deps.repository.TransactionRepository.GetReversalByOriginalTransactionID(tx, req.CooperativeID, original.TransactionID)
+	if err == nil {
+		response, err := s.buildTransactionReversalResponse(tx, req.CooperativeID, original.TransactionID, existingReversal.ReversalTransactionID, existingReversal.Reason, original.PrevHash, "")
+		if err != nil {
+			return nil, err
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			return nil, appErrors.InternalServer("gagal mengambil pembatalan transaksi")
+		}
+
+		return response, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, appErrors.InternalServer("gagal memeriksa pembatalan transaksi")
+	}
+
+	_, err = s.deps.repository.TransactionRepository.GetReversalByReversalTransactionID(tx, req.CooperativeID, original.TransactionID)
+	if err == nil {
+		return nil, appErrors.BadRequest("transaksi pembatalan tidak dapat dibatalkan ulang")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, appErrors.InternalServer("gagal memeriksa transaksi pembatalan")
+	}
+
+	if err := s.validateTransactionReversal(tx, original); err != nil {
+		return nil, err
+	}
+
+	if clientTransactionID != "" {
+		existingTransaction, err := s.deps.repository.TransactionRepository.GetTransactionByClientID(tx, req.CooperativeID, clientTransactionID)
+		if err == nil && existingTransaction.TransactionID != original.TransactionID {
+			return nil, appErrors.BadRequest("client_transaction_id sudah digunakan")
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.InternalServer("gagal memeriksa transaksi duplikat")
+		}
+	}
+
+	prevHash := genesisTransactionHash
+	latestTransaction, err := s.deps.repository.TransactionRepository.GetLatestTransactionForUpdate(tx, req.CooperativeID)
+	if err == nil {
+		prevHash = latestTransaction.CurrentHash
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, appErrors.InternalServer("gagal mengambil transaksi terakhir")
+	}
+
+	now := time.Now()
+	reversalTransaction := &entity.Transaction{
+		TransactionID:       uuid.New(),
+		CooperativeID:       req.CooperativeID,
+		MemberID:            original.MemberID,
+		OfficerID:           req.UserID,
+		TransactionType:     original.TransactionType,
+		Amount:              -original.Amount,
+		Description:         fmt.Sprintf("Pembatalan transaksi %s: %s", buildHashPreview(original.CurrentHash), reason),
+		RecordedAt:          recordedAt,
+		SyncedAt:            &now,
+		PrevHash:            prevHash,
+		IsOfflineCreated:    req.IsOfflineCreated,
+		ClientTransactionID: clientTransactionID,
+	}
+	reversalTransaction.CurrentHash = buildTransactionHash(reversalTransaction)
+
+	err = s.deps.repository.TransactionRepository.CreateTransaction(tx, reversalTransaction)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan transaksi pembatalan")
+	}
+
+	err = s.applyTransactionReversalEffects(tx, original, reversalTransaction)
+	if err != nil {
+		return nil, err
+	}
+
+	reversal := &entity.TransactionReversal{
+		TransactionReversalID: uuid.New(),
+		CooperativeID:         req.CooperativeID,
+		OriginalTransactionID: original.TransactionID,
+		ReversalTransactionID: reversalTransaction.TransactionID,
+		Reason:                reason,
+		CreatedBy:             req.UserID,
+	}
+	err = s.deps.repository.TransactionRepository.CreateTransactionReversal(tx, reversal)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan data pembatalan")
+	}
+
+	response, err := s.buildTransactionReversalResponse(tx, req.CooperativeID, original.TransactionID, reversalTransaction.TransactionID, reason, original.PrevHash, reversalTransaction.PrevHash)
+	if err != nil {
+		return nil, err
+	}
+
+	err = tx.Commit().Error
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal membatalkan transaksi")
+	}
+
+	return response, nil
+}
+
+func (s *TransactionService) buildTransactionReversalResponse(tx *gorm.DB, cooperativeID, originalTransactionID, reversalTransactionID uuid.UUID, reason, originalPrevHash, reversalPrevHash string) (*model.TransactionReversalResponse, error) {
+	originalDetail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, cooperativeID, originalTransactionID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil transaksi asal")
+	}
+
+	reversalDetail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, cooperativeID, reversalTransactionID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil transaksi pembatalan")
+	}
+
+	if reversalPrevHash == "" {
+		reversalTransaction, err := s.deps.repository.TransactionRepository.GetTransactionForUpdate(tx, cooperativeID, reversalTransactionID)
+		if err != nil {
+			return nil, appErrors.InternalServer("gagal mengambil transaksi pembatalan")
+		}
+		reversalPrevHash = reversalTransaction.PrevHash
+	}
+
+	return &model.TransactionReversalResponse{
+		OriginalTransaction: *mapDetailedTransactionResponse(originalDetail, originalPrevHash),
+		ReversalTransaction: *mapDetailedTransactionResponse(reversalDetail, reversalPrevHash),
+		Reason:              reason,
+	}, nil
+}
+
+func (s *TransactionService) validateTransactionReversal(tx *gorm.DB, original *entity.Transaction) error {
+	switch original.TransactionType {
+	case constants.TransactionTypeLoan:
+		loan, err := s.deps.repository.LoanRepository.GetLoanByDisbursementTransactionIDForUpdate(tx, original.TransactionID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return appErrors.NotFound("pinjaman tidak ditemukan")
+			}
+			return appErrors.InternalServer("gagal mengambil pinjaman")
+		}
+
+		allocations, err := s.deps.repository.LoanRepository.CountPaymentAllocationsByLoanID(tx, loan.LoanID)
+		if err != nil {
+			return appErrors.InternalServer("gagal memeriksa angsuran pinjaman")
+		}
+		if allocations > 0 {
+			return appErrors.BadRequest("pinjaman yang sudah memiliki angsuran tidak dapat dibatalkan")
+		}
+	case constants.TransactionTypeInstallment:
+		allocations, err := s.deps.repository.LoanRepository.ListPaymentAllocationsByTransaction(tx, original.TransactionID)
+		if err != nil {
+			return appErrors.InternalServer("gagal mengambil alokasi angsuran")
+		}
+		if len(allocations) == 0 {
+			return appErrors.BadRequest("alokasi angsuran tidak ditemukan")
+		}
+	}
+
+	return nil
+}
+
+func (s *TransactionService) applyTransactionReversalEffects(tx *gorm.DB, original, reversal *entity.Transaction) error {
+	switch original.TransactionType {
+	case constants.TransactionTypeLoan:
+		loan, err := s.deps.repository.LoanRepository.GetLoanByDisbursementTransactionIDForUpdate(tx, original.TransactionID)
+		if err != nil {
+			return appErrors.InternalServer("gagal mengambil pinjaman")
+		}
+
+		loan.Status = "CANCELLED"
+		if err := s.deps.repository.LoanRepository.UpdateLoanAccount(tx, loan); err != nil {
+			return appErrors.InternalServer("gagal membatalkan pinjaman")
+		}
+	case constants.TransactionTypeInstallment:
+		if err := s.reverseInstallmentAllocation(tx, original, reversal); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *TransactionService) reverseInstallmentAllocation(tx *gorm.DB, original, reversal *entity.Transaction) error {
+	allocations, err := s.deps.repository.LoanRepository.ListPaymentAllocationsByTransaction(tx, original.TransactionID)
+	if err != nil {
+		return appErrors.InternalServer("gagal mengambil alokasi angsuran")
+	}
+
+	scheduleIDs := make([]uuid.UUID, 0, len(allocations))
+	for _, allocation := range allocations {
+		scheduleIDs = append(scheduleIDs, allocation.ScheduleID)
+	}
+
+	schedules, err := s.deps.repository.LoanRepository.ListSchedulesByIDsForUpdate(tx, scheduleIDs)
+	if err != nil {
+		return appErrors.InternalServer("gagal mengambil jadwal angsuran")
+	}
+
+	scheduleByID := make(map[uuid.UUID]*entity.LoanInstallmentSchedule, len(schedules))
+	for i := range schedules {
+		scheduleByID[schedules[i].ScheduleID] = &schedules[i]
+	}
+
+	reversalAllocations := make([]entity.LoanPaymentAllocation, 0, len(allocations))
+	var loanID uuid.UUID
+
+	for _, allocation := range allocations {
+		loanID = allocation.LoanID
+		schedule := scheduleByID[allocation.ScheduleID]
+		if schedule == nil {
+			return appErrors.InternalServer("jadwal angsuran tidak ditemukan")
+		}
+
+		schedule.PaidAmount -= allocation.Amount
+		if schedule.PaidAmount < 0 {
+			schedule.PaidAmount = 0
+		}
+		schedule.RemainingAmount = schedule.DueAmount - schedule.PaidAmount
+		schedule.PaidAt = nil
+		if schedule.PaidAmount == 0 {
+			schedule.Status = "UNPAID"
+		} else {
+			schedule.Status = "PARTIAL"
+		}
+
+		if err := s.deps.repository.LoanRepository.UpdateLoanSchedule(tx, schedule); err != nil {
+			return appErrors.InternalServer("gagal memperbarui jadwal angsuran")
+		}
+
+		reversalAllocations = append(reversalAllocations, entity.LoanPaymentAllocation{
+			AllocationID:  uuid.New(),
+			LoanID:        allocation.LoanID,
+			ScheduleID:    allocation.ScheduleID,
+			TransactionID: reversal.TransactionID,
+			Amount:        -allocation.Amount,
+		})
+	}
+
+	if err := s.deps.repository.LoanRepository.CreateLoanPaymentAllocations(tx, reversalAllocations); err != nil {
+		return appErrors.InternalServer("gagal menyimpan alokasi pembatalan angsuran")
+	}
+
+	if loanID != uuid.Nil {
+		loan, err := s.deps.repository.LoanRepository.GetLoanByIDForUpdate(tx, original.CooperativeID, loanID)
+		if err != nil {
+			return appErrors.InternalServer("gagal mengambil pinjaman")
+		}
+		if loan.Status == "PAID" {
+			loan.Status = "ACTIVE"
+			if err := s.deps.repository.LoanRepository.UpdateLoanAccount(tx, loan); err != nil {
+				return appErrors.InternalServer("gagal memperbarui status pinjaman")
+			}
+		}
+	}
+
+	return nil
+}
+
 func mapSavingsType(savingsType string) (string, error) {
 	switch strings.ToUpper(strings.TrimSpace(savingsType)) {
 	case "POKOK":
@@ -896,27 +1190,32 @@ func mapDetailedTransactionResponse(item *model.TransactionListItemResponse, pre
 	enrichTransactionListItem(item)
 
 	return &model.TransactionResponse{
-		TransactionID:        item.TransactionID,
-		CooperativeID:        item.CooperativeID,
-		MemberID:             item.MemberID,
-		MemberName:           item.MemberName,
-		MemberNumber:         item.MemberNumber,
-		MemberMCSGrade:       item.MemberMCSGrade,
-		OfficerID:            item.OfficerID,
-		OfficerName:          item.OfficerName,
-		TransactionType:      item.TransactionType,
-		TransactionTypeLabel: item.TransactionTypeLabel,
-		TransactionGroup:     item.TransactionGroup,
-		Amount:               item.Amount,
-		Description:          item.Description,
-		RecordedAt:           item.RecordedAt,
-		SyncedAt:             item.SyncedAt,
-		PrevHash:             prevHash,
-		CurrentHash:          item.CurrentHash,
-		HashPreview:          item.HashPreview,
-		IsOfflineCreated:     item.IsOfflineCreated,
-		ClientTransactionID:  item.ClientTransactionID,
-		SyncStatus:           item.SyncStatus,
+		TransactionID:         item.TransactionID,
+		CooperativeID:         item.CooperativeID,
+		MemberID:              item.MemberID,
+		MemberName:            item.MemberName,
+		MemberNumber:          item.MemberNumber,
+		MemberMCSGrade:        item.MemberMCSGrade,
+		OfficerID:             item.OfficerID,
+		OfficerName:           item.OfficerName,
+		TransactionType:       item.TransactionType,
+		TransactionTypeLabel:  item.TransactionTypeLabel,
+		TransactionGroup:      item.TransactionGroup,
+		Amount:                item.Amount,
+		Description:           item.Description,
+		RecordedAt:            item.RecordedAt,
+		SyncedAt:              item.SyncedAt,
+		PrevHash:              prevHash,
+		CurrentHash:           item.CurrentHash,
+		HashPreview:           item.HashPreview,
+		IsOfflineCreated:      item.IsOfflineCreated,
+		ClientTransactionID:   item.ClientTransactionID,
+		SyncStatus:            item.SyncStatus,
+		IsReversed:            item.IsReversed,
+		IsReversal:            item.IsReversal,
+		OriginalTransactionID: item.OriginalTransactionID,
+		ReversalTransactionID: item.ReversalTransactionID,
+		ReversalReason:        item.ReversalReason,
 	}
 }
 

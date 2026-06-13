@@ -18,6 +18,8 @@ type User struct {
 
 	UserIdentity               *UserIdentity               `json:"user_identity" gorm:"foreignKey:UserID;constraint:onDelete:CASCADE"`
 	UserPINCredential          *UserPINCredential          `json:"user_pin_credential" gorm:"foreignKey:UserID;constraint:onDelete:CASCADE"`
+	StockMovements             []StockMovement             `json:"stock_movements" gorm:"foreignKey:OfficerID;constraint:onDelete:CASCADE"`
+	StoreSales                 []StoreSale                 `json:"store_sales" gorm:"foreignKey:OfficerID;constraint:onDelete:CASCADE"`
 	RecordedTransaction        []Transaction               `json:"recorded_transactions" gorm:"foreignKey:OfficerID;constraint:onDelete:CASCADE"`
 	UserActivations            []MemberActivationChallenge `json:"user_activations" gorm:"foreignKey:UserID;constraint:onDelete:CASCADE"`
 	Members                    []Member                    `json:"members" gorm:"foreignKey:UserID;constraint:onDelete:CASCADE"`

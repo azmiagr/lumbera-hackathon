@@ -53,6 +53,11 @@ type TransactionResponse struct {
 	MonthlyInstallmentAmount int64      `json:"monthly_installment_amount,omitempty"`
 	RemainingPayableAmount   int64      `json:"remaining_payable_amount,omitempty"`
 	CurrentMonthDueAmount    int64      `json:"current_month_due_amount,omitempty"`
+	IsReversed               bool       `json:"is_reversed"`
+	IsReversal               bool       `json:"is_reversal"`
+	OriginalTransactionID    *uuid.UUID `json:"original_transaction_id,omitempty"`
+	ReversalTransactionID    *uuid.UUID `json:"reversal_transaction_id,omitempty"`
+	ReversalReason           string     `json:"reversal_reason,omitempty"`
 }
 
 type SearchTransactionMembersRequest struct {
@@ -81,26 +86,31 @@ type ListTransactionsRequest struct {
 }
 
 type TransactionListItemResponse struct {
-	TransactionID        uuid.UUID  `json:"transaction_id"`
-	CooperativeID        uuid.UUID  `json:"cooperative_id"`
-	MemberID             uuid.UUID  `json:"member_id"`
-	MemberName           string     `json:"member_name"`
-	MemberNumber         string     `json:"member_number"`
-	MemberMCSGrade       string     `json:"member_mcs_grade"`
-	OfficerID            uuid.UUID  `json:"officer_id"`
-	OfficerName          string     `json:"officer_name"`
-	TransactionType      string     `json:"transaction_type"`
-	TransactionTypeLabel string     `json:"transaction_type_label"`
-	TransactionGroup     string     `json:"transaction_group"`
-	Amount               int64      `json:"amount"`
-	Description          string     `json:"description"`
-	RecordedAt           time.Time  `json:"recorded_at"`
-	SyncedAt             *time.Time `json:"synced_at"`
-	CurrentHash          string     `json:"current_hash"`
-	HashPreview          string     `json:"hash_preview"`
-	IsOfflineCreated     bool       `json:"is_offline_created"`
-	ClientTransactionID  string     `json:"client_transaction_id"`
-	SyncStatus           string     `json:"sync_status"`
+	TransactionID         uuid.UUID  `json:"transaction_id"`
+	CooperativeID         uuid.UUID  `json:"cooperative_id"`
+	MemberID              uuid.UUID  `json:"member_id"`
+	MemberName            string     `json:"member_name"`
+	MemberNumber          string     `json:"member_number"`
+	MemberMCSGrade        string     `json:"member_mcs_grade"`
+	OfficerID             uuid.UUID  `json:"officer_id"`
+	OfficerName           string     `json:"officer_name"`
+	TransactionType       string     `json:"transaction_type"`
+	TransactionTypeLabel  string     `json:"transaction_type_label"`
+	TransactionGroup      string     `json:"transaction_group"`
+	Amount                int64      `json:"amount"`
+	Description           string     `json:"description"`
+	RecordedAt            time.Time  `json:"recorded_at"`
+	SyncedAt              *time.Time `json:"synced_at"`
+	CurrentHash           string     `json:"current_hash"`
+	HashPreview           string     `json:"hash_preview"`
+	IsOfflineCreated      bool       `json:"is_offline_created"`
+	ClientTransactionID   string     `json:"client_transaction_id"`
+	SyncStatus            string     `json:"sync_status"`
+	IsReversed            bool       `json:"is_reversed"`
+	IsReversal            bool       `json:"is_reversal"`
+	OriginalTransactionID *uuid.UUID `json:"original_transaction_id,omitempty"`
+	ReversalTransactionID *uuid.UUID `json:"reversal_transaction_id,omitempty"`
+	ReversalReason        string     `json:"reversal_reason,omitempty"`
 }
 
 type ListTransactionsResponse struct {
@@ -169,4 +179,19 @@ type CreateCashWithdrawalTransactionRequest struct {
 	RecordedAt          *time.Time `json:"recorded_at"`
 	IsOfflineCreated    bool       `json:"is_offline_created"`
 	ClientTransactionID string     `json:"client_transaction_id"`
+}
+
+type ReverseTransactionRequest struct {
+	AuthContext
+	TransactionID       uuid.UUID  `json:"-" uri:"transactionID"`
+	Reason              string     `json:"reason"`
+	RecordedAt          *time.Time `json:"recorded_at"`
+	IsOfflineCreated    bool       `json:"is_offline_created"`
+	ClientTransactionID string     `json:"client_transaction_id"`
+}
+
+type TransactionReversalResponse struct {
+	OriginalTransaction TransactionResponse `json:"original_transaction"`
+	ReversalTransaction TransactionResponse `json:"reversal_transaction"`
+	Reason              string              `json:"reason"`
 }
