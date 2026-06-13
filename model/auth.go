@@ -1,6 +1,10 @@
 package model
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type GetUserPINCredentialParam struct {
 	PinCredentialID uuid.UUID `json:"-"`
@@ -86,6 +90,15 @@ type LoginResponse struct {
 	RoleID        uuid.UUID  `json:"role_id"`
 	RoleCode      string     `json:"role_code"`
 	MemberID      *uuid.UUID `json:"member_id"`
+}
+
+type LogoutRequest struct {
+	AuthContext
+}
+
+type LogoutResponse struct {
+	SessionID uuid.UUID `json:"session_id"`
+	RevokedAt time.Time `json:"revoked_at"`
 }
 
 type ForgotPINRequestOTPRequest struct {

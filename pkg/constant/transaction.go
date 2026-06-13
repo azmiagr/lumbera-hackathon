@@ -5,13 +5,16 @@ const (
 	TransactionTypeSavingsMandatory = "SIMPANAN_WAJIB"
 	TransactionTypeSavingsVoluntary = "SIMPANAN_SUKARELA"
 
+	TransactionTypeCashWithdrawal = "TARIK_TUNAI"
+
 	TransactionTypeLoan        = "PINJAMAN"
 	TransactionTypeInstallment = "ANGSURAN"
 
-	TransactionGroupAll         = "SEMUA"
-	TransactionGroupSavings     = "SIMPANAN"
-	TransactionGroupLoan        = "PINJAMAN"
-	TransactionGroupInstallment = "ANGSURAN"
+	TransactionGroupAll            = "SEMUA"
+	TransactionGroupSavings        = "SIMPANAN"
+	TransactionGroupCashWithdrawal = "TARIK_TUNAI"
+	TransactionGroupLoan           = "PINJAMAN"
+	TransactionGroupInstallment    = "ANGSURAN"
 
 	SyncStatusSynced = "SYNCED"
 )

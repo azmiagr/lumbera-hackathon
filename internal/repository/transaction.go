@@ -134,21 +134,23 @@ func (r *TransactionRepository) GetMemberTransactionSummary(tx *gorm.DB, coopera
 	err := tx.Debug().
 		Table("transactions").
 		Select(`
-            COALESCE(SUM(CASE
-                WHEN transaction_type IN ? THEN amount
-                ELSE 0
-            END), 0) AS savings_balance,
-            COALESCE(SUM(CASE
-                WHEN transaction_type = ? THEN amount
-                WHEN transaction_type = ? THEN -amount
-                ELSE 0
-            END), 0) AS loan_outstanding
-        `,
+			COALESCE(SUM(CASE
+				WHEN transaction_type IN ? THEN amount
+				WHEN transaction_type = ? THEN -amount
+				ELSE 0
+			END), 0) AS savings_balance,
+			COALESCE(SUM(CASE
+				WHEN transaction_type = ? THEN amount
+				WHEN transaction_type = ? THEN -amount
+				ELSE 0
+			END), 0) AS loan_outstanding
+		`,
 			[]string{
 				constants.TransactionTypeSavingsPrincipal,
 				constants.TransactionTypeSavingsMandatory,
 				constants.TransactionTypeSavingsVoluntary,
 			},
+			constants.TransactionTypeCashWithdrawal,
 			constants.TransactionTypeLoan,
 			constants.TransactionTypeInstallment,
 		).
@@ -201,6 +203,8 @@ func applyTransactionTypeFilter(query *gorm.DB, transactionType string) *gorm.DB
 		return query.Where("transactions.transaction_type = ?", constants.TransactionTypeLoan)
 	case constants.TransactionGroupInstallment:
 		return query.Where("transactions.transaction_type = ?", constants.TransactionTypeInstallment)
+	case constants.TransactionGroupCashWithdrawal:
+		return query.Where("transactions.transaction_type = ?", constants.TransactionTypeCashWithdrawal)
 	default:
 		return query
 	}

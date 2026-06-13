@@ -5,6 +5,7 @@ import (
 
 	"github.com/azmiagr/lumbera-hackathon/entity"
 	"github.com/azmiagr/lumbera-hackathon/model"
+	constants "github.com/azmiagr/lumbera-hackathon/pkg/constant"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -15,6 +16,7 @@ type IMemberRepository interface {
 	ListMembers(tx *gorm.DB, req model.ListMembersRequest) ([]model.MemberListItemResponse, int64, error)
 	CountMembersByCooperative(tx *gorm.DB, cooperativeID uuid.UUID) (int64, error)
 	CreateMember(tx *gorm.DB, member *entity.Member) error
+	CountActiveMembersByCooperative(tx *gorm.DB, cooperativeID uuid.UUID) (int64, error)
 }
 
 type MemberRepository struct {
@@ -56,27 +58,43 @@ func (r *MemberRepository) SearchTransactionMembers(tx *gorm.DB, req model.Searc
 			users.full_name,
 			members.member_number,
 			members.cooperative_id,
-			members.mcs_grade
-		`).
+			members.mcs_grade,
+			COALESCE(SUM(CASE
+				WHEN transactions.transaction_type IN ? THEN transactions.amount
+				WHEN transactions.transaction_type = ? THEN -transactions.amount
+				ELSE 0
+			END), 0) AS savings_balance,
+			COALESCE(SUM(CASE
+				WHEN transactions.transaction_type = ? THEN transactions.amount
+				WHEN transactions.transaction_type = ? THEN -transactions.amount
+				ELSE 0
+			END), 0) AS loan_outstanding
+		`,
+			[]string{
+				constants.TransactionTypeSavingsPrincipal,
+				constants.TransactionTypeSavingsMandatory,
+				constants.TransactionTypeSavingsVoluntary,
+			},
+			constants.TransactionTypeCashWithdrawal,
+			constants.TransactionTypeLoan,
+			constants.TransactionTypeInstallment,
+		).
 		Joins("JOIN users ON users.user_id = members.user_id").
+		Joins("LEFT JOIN transactions ON transactions.member_id = members.member_id AND transactions.cooperative_id = members.cooperative_id").
 		Where("members.cooperative_id = ?", req.CooperativeID).
 		Where("members.member_status = ?", "ACTIVE").
-		Where("users.status = ?", "ACTIVE").
+		Where("users.status IN ?", []string{"ACTIVE", "PIN_REQUIRED"}).
+		Group("members.member_id").
 		Order("users.full_name ASC").
 		Limit(limit)
 
 	search := strings.TrimSpace(req.Search)
 	if search != "" {
 		keyword := "%" + search + "%"
-		query = query.Where(
-			"(users.full_name LIKE ? OR members.member_number LIKE ?)",
-			keyword,
-			keyword,
-		)
+		query = query.Where("(users.full_name LIKE ? OR members.member_number LIKE ?)", keyword, keyword)
 	}
 
-	err := query.Scan(&members).Error
-	if err != nil {
+	if err := query.Scan(&members).Error; err != nil {
 		return nil, err
 	}
 
@@ -112,7 +130,7 @@ func (r *MemberRepository) ListMembers(tx *gorm.DB, req model.ListMembersRequest
 		`).
 		Joins("JOIN users ON users.user_id = members.user_id").
 		Where("members.cooperative_id = ?", req.CooperativeID).
-		Where("users.status = ?", "ACTIVE")
+		Where("users.status IN ?", []string{"ACTIVE", "PIN_REQUIRED"})
 
 	status := strings.ToUpper(strings.TrimSpace(req.Status))
 	if status == "" {
@@ -166,6 +184,22 @@ func (r *MemberRepository) CountMembersByCooperative(tx *gorm.DB, cooperativeID 
 	err := tx.Debug().
 		Model(&entity.Member{}).
 		Where("cooperative_id = ?", cooperativeID).
+		Count(&total).Error
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
+func (r *MemberRepository) CountActiveMembersByCooperative(tx *gorm.DB, cooperativeID uuid.UUID) (int64, error) {
+	var total int64
+	err := tx.Debug().
+		Table("members").
+		Joins("JOIN users ON users.user_id = members.user_id").
+		Where("members.cooperative_id = ?", cooperativeID).
+		Where("members.member_status = ?", "ACTIVE").
+		Where("users.status IN ?", []string{"ACTIVE", "PIN_REQUIRED"}).
 		Count(&total).Error
 	if err != nil {
 		return 0, err

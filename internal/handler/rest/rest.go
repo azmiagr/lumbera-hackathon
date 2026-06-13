@@ -50,6 +50,7 @@ func (r *Rest) MountEndpoint() {
 	auth.POST("forgot-pin/request-otp", r.RequestForgotPINOTP)
 	auth.POST("forgot-pin/verify-otp", r.VerifyForgotPINOTP)
 	auth.POST("forgot-pin/set-pin", r.SetForgottenPIN)
+	auth.POST("logout", r.middleware.AuthenticateUser(), r.Logout)
 
 	transactions := baseURL.Group("/transactions")
 	transactions.Use(r.middleware.AuthenticateUser())
@@ -58,6 +59,8 @@ func (r *Rest) MountEndpoint() {
 	transactions.GET("/members", r.SearchTransactionMembers)
 	transactions.POST("/savings", r.CreateSavingsTransaction)
 	transactions.POST("/loans", r.CreateLoanTransaction)
+	transactions.POST("/installments", r.CreateInstallmentTransaction)
+	transactions.POST("/cash-withdrawals", r.CreateCashWithdrawalTransaction)
 
 	members := baseURL.Group("/members")
 	members.Use(r.middleware.AuthenticateUser())
@@ -76,6 +79,8 @@ func (r *Rest) MountEndpoint() {
 	reports.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
 	reports.GET("/financial", r.GetFinancialReport)
 	reports.GET("/financial/export", r.ExportFinancialReportXLSX)
+	reports.GET("/cooperative-health-score", r.GetCooperativeHealthScore)
+	reports.GET("/dashboard-summary", r.GetDashboardSummary)
 
 }
 

@@ -23,6 +23,8 @@ type ITransactionService interface {
 	CreateSavingsTransaction(req model.CreateSavingsTransactionRequest) (*model.TransactionResponse, error)
 	ListTransactions(req model.ListTransactionsRequest) (*model.ListTransactionsResponse, error)
 	CreateLoanTransaction(req model.CreateLoanTransactionRequest) (*model.TransactionResponse, error)
+	CreateInstallmentTransaction(req model.CreateInstallmentTransactionRequest) (*model.InstallmentTransactionResponse, error)
+	CreateCashWithdrawalTransaction(req model.CreateCashWithdrawalTransactionRequest) (*model.TransactionResponse, error)
 }
 
 type TransactionService struct {
@@ -94,6 +96,10 @@ func (s *TransactionService) CreateSavingsTransaction(req model.CreateSavingsTra
 	if clientTransactionID != "" {
 		existingTransaction, err := s.deps.repository.TransactionRepository.GetTransactionByClientID(tx, req.CooperativeID, clientTransactionID)
 		if err == nil {
+			if existingTransaction.TransactionType != constants.TransactionTypeCashWithdrawal {
+				return nil, appErrors.BadRequest("client_transaction_id sudah digunakan untuk transaksi lain")
+			}
+
 			detail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, req.CooperativeID, existingTransaction.TransactionID)
 			if err != nil {
 				return nil, appErrors.InternalServer("gagal mengambil detail transaksi")
@@ -246,11 +252,24 @@ func (s *TransactionService) CreateLoanTransaction(req model.CreateLoanTransacti
 				return nil, appErrors.InternalServer("gagal mengambil ringkasan anggota")
 			}
 
+			loan, err := s.deps.repository.LoanRepository.GetLoanByDisbursementTransactionID(tx, existingTransaction.TransactionID)
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, appErrors.InternalServer("gagal mengambil pinjaman")
+			}
+
+			var loanSummary *model.LoanSummaryResponse
+			if loan != nil {
+				loanSummary, err = s.deps.repository.LoanRepository.GetLoanSummary(tx, loan.LoanID, recordedAt)
+				if err != nil {
+					return nil, appErrors.InternalServer("gagal mengambil ringkasan pinjaman")
+				}
+			}
+
 			if err := tx.Commit().Error; err != nil {
 				return nil, appErrors.InternalServer("gagal mengambil transaksi")
 			}
 
-			return mapDetailedTransactionResponseWithSummary(detail, existingTransaction.PrevHash, summary), nil
+			return mapDetailedTransactionResponseWithSummaryAndLoan(detail, existingTransaction.PrevHash, summary, loanSummary), nil
 		}
 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -279,6 +298,16 @@ func (s *TransactionService) CreateLoanTransaction(req model.CreateLoanTransacti
 	}
 	if financialConfig != nil && financialConfig.MaxLoanAmountPerMember > 0 && summary.LoanOutstanding+req.Amount > financialConfig.MaxLoanAmountPerMember {
 		return nil, appErrors.BadRequest("nominal pinjaman melebihi batas pinjaman anggota")
+	}
+
+	if financialConfig == nil || financialConfig.MaxLoanTermMonths <= 0 {
+		return nil, appErrors.BadRequest("konfigurasi tenor pinjaman belum tersedia")
+	}
+
+	if _, err := s.deps.repository.LoanRepository.GetActiveLoanByMemberForUpdate(tx, req.CooperativeID, req.MemberID); err == nil {
+		return nil, appErrors.BadRequest("anggota masih memiliki pinjaman aktif")
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, appErrors.InternalServer("gagal memvalidasi pinjaman aktif")
 	}
 
 	prevHash := genesisTransactionHash
@@ -310,19 +339,38 @@ func (s *TransactionService) CreateLoanTransaction(req model.CreateLoanTransacti
 		return nil, appErrors.InternalServer("gagal menyimpan transaksi pinjaman")
 	}
 
+	loanNumber, err := s.deps.repository.LoanRepository.GenerateNextLoanNumber(tx, req.CooperativeID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal membuat nomor pinjaman")
+	}
+
+	loan, schedules := buildLoanAccountAndSchedules(req, transaction.TransactionID, loanNumber, financialConfig, recordedAt)
+
+	if err := s.deps.repository.LoanRepository.CreateLoanAccount(tx, loan); err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan pinjaman")
+	}
+
+	if err := s.deps.repository.LoanRepository.CreateLoanInstallmentSchedules(tx, schedules); err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan jadwal angsuran")
+	}
+
 	detail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, req.CooperativeID, transaction.TransactionID)
 	if err != nil {
 		return nil, appErrors.InternalServer("gagal mengambil detail transaksi")
 	}
 
 	summary.LoanOutstanding += req.Amount
+	loanSummary, err := s.deps.repository.LoanRepository.GetLoanSummary(tx, loan.LoanID, recordedAt)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil ringkasan pinjaman")
+	}
 
 	err = tx.Commit().Error
 	if err != nil {
 		return nil, appErrors.InternalServer("gagal menyimpan transaksi pinjaman")
 	}
 
-	return mapDetailedTransactionResponseWithSummary(detail, transaction.PrevHash, summary), nil
+	return mapDetailedTransactionResponseWithSummaryAndLoan(detail, transaction.PrevHash, summary, loanSummary), nil
 }
 
 func mapDetailedTransactionResponseWithSummary(item *model.TransactionListItemResponse, prevHash string, summary *model.TransactionMemberSummaryResponse) *model.TransactionResponse {
@@ -332,6 +380,283 @@ func mapDetailedTransactionResponseWithSummary(item *model.TransactionListItemRe
 		response.MemberLoanOutstanding = summary.LoanOutstanding
 	}
 	return response
+}
+
+func (s *TransactionService) CreateInstallmentTransaction(req model.CreateInstallmentTransactionRequest) (*model.InstallmentTransactionResponse, error) {
+	if req.UserID == uuid.Nil || req.CooperativeID == uuid.Nil {
+		return nil, appErrors.Unauthorized("akses tidak valid")
+	}
+
+	if req.RoleCode != constants.RoleCodePengurusKoperasi {
+		return nil, appErrors.Forbidden("hanya pengurus koperasi yang dapat mencatat transaksi")
+	}
+
+	if req.LoanID == uuid.Nil {
+		return nil, appErrors.BadRequest("pinjaman wajib dipilih")
+	}
+
+	if req.Amount <= 0 {
+		return nil, appErrors.BadRequest("nominal angsuran wajib lebih dari 0")
+	}
+
+	recordedAt := time.Now()
+	if req.RecordedAt != nil {
+		recordedAt = *req.RecordedAt
+	}
+
+	now := time.Now()
+	clientTransactionID := strings.TrimSpace(req.ClientTransactionID)
+
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	if clientTransactionID != "" {
+		existingTransaction, err := s.deps.repository.TransactionRepository.GetTransactionByClientID(tx, req.CooperativeID, clientTransactionID)
+		if err == nil {
+			detail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, req.CooperativeID, existingTransaction.TransactionID)
+			if err != nil {
+				return nil, appErrors.InternalServer("gagal mengambil detail transaksi")
+			}
+
+			loanSummary, allocations, err := s.getInstallmentResponseMetadata(tx, req.CooperativeID, existingTransaction.TransactionID, existingTransaction.RecordedAt)
+			if err != nil {
+				return nil, err
+			}
+
+			if err := tx.Commit().Error; err != nil {
+				return nil, appErrors.InternalServer("gagal mengambil transaksi")
+			}
+
+			response := mapDetailedInstallmentResponse(detail, existingTransaction.PrevHash, loanSummary, allocations)
+			return response, nil
+		}
+
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.InternalServer("gagal memeriksa transaksi duplikat")
+		}
+	}
+
+	loan, err := s.deps.repository.LoanRepository.GetLoanByIDForUpdate(tx, req.CooperativeID, req.LoanID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.NotFound("pinjaman tidak ditemukan")
+		}
+		return nil, appErrors.InternalServer("gagal mengambil pinjaman")
+	}
+
+	if loan.Status != "ACTIVE" {
+		return nil, appErrors.BadRequest("pinjaman tidak aktif")
+	}
+
+	schedules, err := s.deps.repository.LoanRepository.ListPayableSchedulesForUpdate(tx, loan.LoanID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil jadwal angsuran")
+	}
+
+	remainingPayable := sumScheduleRemaining(schedules)
+	if remainingPayable <= 0 {
+		return nil, appErrors.BadRequest("pinjaman sudah lunas")
+	}
+
+	if req.Amount > remainingPayable {
+		return nil, appErrors.BadRequest("nominal angsuran melebihi sisa tagihan")
+	}
+
+	prevHash := genesisTransactionHash
+	latestTransaction, err := s.deps.repository.TransactionRepository.GetLatestTransactionForUpdate(tx, req.CooperativeID)
+	if err == nil {
+		prevHash = latestTransaction.CurrentHash
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, appErrors.InternalServer("gagal mengambil transaksi terakhir")
+	}
+
+	transaction := &entity.Transaction{
+		TransactionID:       uuid.New(),
+		CooperativeID:       req.CooperativeID,
+		MemberID:            loan.MemberID,
+		OfficerID:           req.UserID,
+		TransactionType:     constants.TransactionTypeInstallment,
+		Amount:              req.Amount,
+		Description:         strings.TrimSpace(req.Description),
+		RecordedAt:          recordedAt,
+		SyncedAt:            &now,
+		PrevHash:            prevHash,
+		IsOfflineCreated:    req.IsOfflineCreated,
+		ClientTransactionID: clientTransactionID,
+	}
+	transaction.CurrentHash = buildTransactionHash(transaction)
+
+	if err := s.deps.repository.TransactionRepository.CreateTransaction(tx, transaction); err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan transaksi angsuran")
+	}
+
+	allocations, updatedSchedules, remainingPayment := allocateInstallmentPayment(schedules, req.Amount, recordedAt)
+	if remainingPayment > 0 {
+		return nil, appErrors.BadRequest("nominal angsuran melebihi sisa tagihan")
+	}
+
+	for i := range allocations {
+		allocations[i].TransactionID = transaction.TransactionID
+		if err := s.deps.repository.LoanRepository.CreateLoanPaymentAllocation(tx, &allocations[i]); err != nil {
+			return nil, appErrors.InternalServer("gagal menyimpan alokasi angsuran")
+		}
+	}
+
+	for i := range updatedSchedules {
+		if err := s.deps.repository.LoanRepository.UpdateLoanSchedule(tx, &updatedSchedules[i]); err != nil {
+			return nil, appErrors.InternalServer("gagal memperbarui jadwal angsuran")
+		}
+	}
+
+	if remainingPayable-req.Amount == 0 {
+		loan.Status = "PAID"
+		if err := s.deps.repository.LoanRepository.UpdateLoanAccount(tx, loan); err != nil {
+			return nil, appErrors.InternalServer("gagal memperbarui status pinjaman")
+		}
+	}
+
+	detail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, req.CooperativeID, transaction.TransactionID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil detail transaksi")
+	}
+
+	loanSummary, err := s.deps.repository.LoanRepository.GetLoanSummary(tx, loan.LoanID, recordedAt)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil ringkasan pinjaman")
+	}
+
+	allocationResponses := mapInstallmentAllocationResponses(updatedSchedules, allocations)
+
+	err = tx.Commit().Error
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan transaksi angsuran")
+	}
+
+	return mapDetailedInstallmentResponse(detail, transaction.PrevHash, loanSummary, allocationResponses), nil
+}
+
+func (s *TransactionService) CreateCashWithdrawalTransaction(req model.CreateCashWithdrawalTransactionRequest) (*model.TransactionResponse, error) {
+	if req.UserID == uuid.Nil || req.CooperativeID == uuid.Nil {
+		return nil, appErrors.Unauthorized("akses tidak valid")
+	}
+
+	if req.RoleCode != constants.RoleCodePengurusKoperasi {
+		return nil, appErrors.Forbidden("hanya pengurus koperasi yang dapat mencatat transaksi")
+	}
+
+	if req.MemberID == uuid.Nil {
+		return nil, appErrors.BadRequest("anggota wajib dipilih")
+	}
+
+	if req.Amount <= 0 {
+		return nil, appErrors.BadRequest("nominal tarik tunai wajib lebih dari 0")
+	}
+
+	recordedAt := time.Now()
+	if req.RecordedAt != nil {
+		recordedAt = *req.RecordedAt
+	}
+
+	now := time.Now()
+	clientTransactionID := strings.TrimSpace(req.ClientTransactionID)
+
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	if clientTransactionID != "" {
+		existingTransaction, err := s.deps.repository.TransactionRepository.GetTransactionByClientID(tx, req.CooperativeID, clientTransactionID)
+		if err == nil {
+			if existingTransaction.TransactionType != constants.TransactionTypeSavingsPrincipal &&
+				existingTransaction.TransactionType != constants.TransactionTypeSavingsMandatory &&
+				existingTransaction.TransactionType != constants.TransactionTypeSavingsVoluntary {
+				return nil, appErrors.BadRequest("client_transaction_id sudah digunakan untuk transaksi lain")
+			}
+
+			detail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, req.CooperativeID, existingTransaction.TransactionID)
+			if err != nil {
+				return nil, appErrors.InternalServer("gagal mengambil detail transaksi")
+			}
+
+			summary, err := s.deps.repository.TransactionRepository.GetMemberTransactionSummary(tx, req.CooperativeID, existingTransaction.MemberID)
+			if err != nil {
+				return nil, appErrors.InternalServer("gagal mengambil ringkasan anggota")
+			}
+
+			if err := tx.Commit().Error; err != nil {
+				return nil, appErrors.InternalServer("gagal mengambil transaksi")
+			}
+
+			return mapDetailedTransactionResponseWithSummary(detail, existingTransaction.PrevHash, summary), nil
+		}
+
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.InternalServer("gagal memeriksa transaksi duplikat")
+		}
+	}
+
+	_, err := s.deps.repository.MemberRepository.GetActiveMember(tx, req.CooperativeID, req.MemberID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErrors.NotFound("anggota aktif tidak ditemukan")
+		}
+		return nil, appErrors.InternalServer("gagal memvalidasi anggota")
+	}
+
+	summary, err := s.deps.repository.TransactionRepository.GetMemberTransactionSummary(tx, req.CooperativeID, req.MemberID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil ringkasan anggota")
+	}
+
+	if summary.SavingsBalance <= 0 {
+		return nil, appErrors.BadRequest("saldo anggota tidak mencukupi")
+	}
+
+	if req.Amount > summary.SavingsBalance {
+		return nil, appErrors.BadRequest("saldo anggota tidak mencukupi")
+	}
+
+	prevHash := genesisTransactionHash
+	latestTransaction, err := s.deps.repository.TransactionRepository.GetLatestTransactionForUpdate(tx, req.CooperativeID)
+	if err == nil {
+		prevHash = latestTransaction.CurrentHash
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, appErrors.InternalServer("gagal mengambil transaksi terakhir")
+	}
+
+	transaction := &entity.Transaction{
+		TransactionID:       uuid.New(),
+		CooperativeID:       req.CooperativeID,
+		MemberID:            req.MemberID,
+		OfficerID:           req.UserID,
+		TransactionType:     constants.TransactionTypeCashWithdrawal,
+		Amount:              req.Amount,
+		Description:         strings.TrimSpace(req.Description),
+		RecordedAt:          recordedAt,
+		SyncedAt:            &now,
+		PrevHash:            prevHash,
+		IsOfflineCreated:    req.IsOfflineCreated,
+		ClientTransactionID: clientTransactionID,
+	}
+	transaction.CurrentHash = buildTransactionHash(transaction)
+
+	err = s.deps.repository.TransactionRepository.CreateTransaction(tx, transaction)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan transaksi tarik tunai")
+	}
+
+	detail, err := s.deps.repository.TransactionRepository.GetTransactionDetail(tx, req.CooperativeID, transaction.TransactionID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil detail transaksi")
+	}
+
+	summary.SavingsBalance -= req.Amount
+
+	err = tx.Commit().Error
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menyimpan transaksi tarik tunai")
+	}
+
+	return mapDetailedTransactionResponseWithSummary(detail, transaction.PrevHash, summary), nil
 }
 
 func mapSavingsType(savingsType string) (string, error) {
@@ -345,6 +670,206 @@ func mapSavingsType(savingsType string) (string, error) {
 	default:
 		return "", appErrors.BadRequest("jenis simpanan tidak valid")
 	}
+}
+func mapDetailedTransactionResponseWithSummaryAndLoan(item *model.TransactionListItemResponse, prevHash string, memberSummary *model.TransactionMemberSummaryResponse, loanSummary *model.LoanSummaryResponse) *model.TransactionResponse {
+	response := mapDetailedTransactionResponseWithSummary(item, prevHash, memberSummary)
+	enrichTransactionResponseWithLoan(response, loanSummary)
+	return response
+}
+
+func buildLoanAccountAndSchedules(req model.CreateLoanTransactionRequest, transactionID uuid.UUID, loanNumber string, financialConfig *entity.FinancialConfiguration, disbursedAt time.Time) (*entity.LoanAccount, []entity.LoanInstallmentSchedule) {
+	termMonths := financialConfig.MaxLoanTermMonths
+	monthlyInterest := req.Amount * int64(financialConfig.LoanInterestRateBpsPerMonth) / 10000
+	totalInterest := monthlyInterest * int64(termMonths)
+	totalPayable := req.Amount + totalInterest
+	monthlyDue := ceilDiv(totalPayable, int64(termMonths))
+
+	loan := &entity.LoanAccount{
+		LoanID:                    uuid.New(),
+		CooperativeID:             req.CooperativeID,
+		MemberID:                  req.MemberID,
+		DisbursementTransactionID: transactionID,
+		LoanNumber:                loanNumber,
+		PrincipalAmount:           req.Amount,
+		TotalInterestAmount:       totalInterest,
+		TotalPayableAmount:        totalPayable,
+		MonthlyInstallmentAmount:  monthlyDue,
+		InterestRateBpsPerMonth:   financialConfig.LoanInterestRateBpsPerMonth,
+		TermMonths:                termMonths,
+		Status:                    "ACTIVE",
+		DisbursedAt:               disbursedAt,
+	}
+
+	schedules := make([]entity.LoanInstallmentSchedule, 0, termMonths)
+	remainingPayable := totalPayable
+	firstDueDate := disbursedAt.AddDate(0, 1, 0)
+
+	for installmentNo := 1; installmentNo <= termMonths; installmentNo++ {
+		dueAmount := monthlyDue
+		if installmentNo == termMonths || remainingPayable < monthlyDue {
+			dueAmount = remainingPayable
+		}
+
+		schedules = append(schedules, entity.LoanInstallmentSchedule{
+			ScheduleID:      uuid.New(),
+			LoanID:          loan.LoanID,
+			InstallmentNo:   installmentNo,
+			DueDate:         firstDueDate.AddDate(0, installmentNo-1, 0),
+			DueAmount:       dueAmount,
+			PaidAmount:      0,
+			RemainingAmount: dueAmount,
+			Status:          "UNPAID",
+		})
+
+		remainingPayable -= dueAmount
+	}
+
+	return loan, schedules
+}
+
+func ceilDiv(value int64, divisor int64) int64 {
+	if divisor <= 0 {
+		return 0
+	}
+
+	return (value + divisor - 1) / divisor
+}
+
+func enrichTransactionResponseWithLoan(response *model.TransactionResponse, loanSummary *model.LoanSummaryResponse) {
+	if response == nil || loanSummary == nil {
+		return
+	}
+
+	response.LoanID = &loanSummary.LoanID
+	response.LoanNumber = loanSummary.LoanNumber
+	response.MonthlyInstallmentAmount = loanSummary.MonthlyInstallmentAmount
+	response.RemainingPayableAmount = loanSummary.RemainingPayableAmount
+	response.CurrentMonthDueAmount = loanSummary.CurrentMonthDueAmount
+}
+
+func allocateInstallmentPayment(schedules []entity.LoanInstallmentSchedule, amount int64, paidAt time.Time) ([]entity.LoanPaymentAllocation, []entity.LoanInstallmentSchedule, int64) {
+	remainingPayment := amount
+	allocations := make([]entity.LoanPaymentAllocation, 0)
+	updatedSchedules := make([]entity.LoanInstallmentSchedule, 0)
+
+	for i := range schedules {
+		if remainingPayment <= 0 {
+			break
+		}
+
+		allocAmount := minInt64(remainingPayment, schedules[i].RemainingAmount)
+		if allocAmount <= 0 {
+			continue
+		}
+
+		schedules[i].PaidAmount += allocAmount
+		schedules[i].RemainingAmount -= allocAmount
+
+		if schedules[i].RemainingAmount == 0 {
+			schedules[i].Status = "PAID"
+			schedules[i].PaidAt = &paidAt
+		} else {
+			schedules[i].Status = "PARTIAL"
+		}
+
+		allocations = append(allocations, entity.LoanPaymentAllocation{
+			AllocationID: uuid.New(),
+			LoanID:       schedules[i].LoanID,
+			ScheduleID:   schedules[i].ScheduleID,
+			Amount:       allocAmount,
+		})
+		updatedSchedules = append(updatedSchedules, schedules[i])
+		remainingPayment -= allocAmount
+	}
+
+	return allocations, updatedSchedules, remainingPayment
+}
+
+func (s *TransactionService) getInstallmentResponseMetadata(tx *gorm.DB, cooperativeID uuid.UUID, transactionID uuid.UUID, asOf time.Time) (*model.LoanSummaryResponse, []model.InstallmentAllocationResponse, error) {
+	allocations, err := s.deps.repository.LoanRepository.ListPaymentAllocationsByTransaction(tx, transactionID)
+	if err != nil {
+		return nil, nil, appErrors.InternalServer("gagal mengambil alokasi angsuran")
+	}
+
+	if len(allocations) == 0 {
+		return nil, nil, appErrors.InternalServer("alokasi angsuran tidak ditemukan")
+	}
+
+	scheduleIDs := make([]uuid.UUID, 0, len(allocations))
+	for _, allocation := range allocations {
+		scheduleIDs = append(scheduleIDs, allocation.ScheduleID)
+	}
+
+	schedules, err := s.deps.repository.LoanRepository.ListSchedulesByIDs(tx, scheduleIDs)
+	if err != nil {
+		return nil, nil, appErrors.InternalServer("gagal mengambil jadwal angsuran")
+	}
+
+	loan, err := s.deps.repository.LoanRepository.GetLoanByIDForUpdate(tx, cooperativeID, allocations[0].LoanID)
+	if err != nil {
+		return nil, nil, appErrors.InternalServer("gagal mengambil pinjaman")
+	}
+
+	loanSummary, err := s.deps.repository.LoanRepository.GetLoanSummary(tx, loan.LoanID, asOf)
+	if err != nil {
+		return nil, nil, appErrors.InternalServer("gagal mengambil ringkasan pinjaman")
+	}
+
+	return loanSummary, mapInstallmentAllocationResponses(schedules, allocations), nil
+}
+
+func mapInstallmentAllocationResponses(schedules []entity.LoanInstallmentSchedule, allocations []entity.LoanPaymentAllocation) []model.InstallmentAllocationResponse {
+	scheduleByID := make(map[uuid.UUID]entity.LoanInstallmentSchedule, len(schedules))
+	for _, schedule := range schedules {
+		scheduleByID[schedule.ScheduleID] = schedule
+	}
+
+	responses := make([]model.InstallmentAllocationResponse, 0, len(allocations))
+	for _, allocation := range allocations {
+		schedule := scheduleByID[allocation.ScheduleID]
+		responses = append(responses, model.InstallmentAllocationResponse{
+			ScheduleID:      allocation.ScheduleID,
+			InstallmentNo:   schedule.InstallmentNo,
+			DueDate:         schedule.DueDate,
+			AllocatedAmount: allocation.Amount,
+			ScheduleStatus:  schedule.Status,
+		})
+	}
+
+	return responses
+}
+
+func mapDetailedInstallmentResponse(item *model.TransactionListItemResponse, prevHash string, loanSummary *model.LoanSummaryResponse, allocations []model.InstallmentAllocationResponse) *model.InstallmentTransactionResponse {
+	transactionResponse := mapDetailedTransactionResponse(item, prevHash)
+	enrichTransactionResponseWithLoan(transactionResponse, loanSummary)
+
+	response := &model.InstallmentTransactionResponse{
+		TransactionResponse: *transactionResponse,
+		Allocations:         allocations,
+	}
+
+	if loanSummary != nil {
+		response.Loan = *loanSummary
+	}
+
+	return response
+}
+
+func sumScheduleRemaining(schedules []entity.LoanInstallmentSchedule) int64 {
+	var total int64
+	for _, schedule := range schedules {
+		total += schedule.RemainingAmount
+	}
+
+	return total
+}
+
+func minInt64(a int64, b int64) int64 {
+	if a < b {
+		return a
+	}
+
+	return b
 }
 
 func buildTransactionHash(transaction *entity.Transaction) string {
@@ -408,6 +933,8 @@ func getTransactionGroup(transactionType string) string {
 		constants.TransactionTypeSavingsMandatory,
 		constants.TransactionTypeSavingsVoluntary:
 		return constants.TransactionGroupSavings
+	case constants.TransactionTypeCashWithdrawal:
+		return constants.TransactionGroupCashWithdrawal
 	case constants.TransactionTypeLoan:
 		return constants.TransactionGroupLoan
 	case constants.TransactionTypeInstallment:
@@ -425,6 +952,8 @@ func getTransactionTypeLabel(transactionType string) string {
 		return "Simpanan Wajib"
 	case constants.TransactionTypeSavingsVoluntary:
 		return "Simpanan Sukarela"
+	case constants.TransactionTypeCashWithdrawal:
+		return "Tarik Tunai"
 	case constants.TransactionTypeLoan:
 		return "Pinjaman"
 	case constants.TransactionTypeInstallment:

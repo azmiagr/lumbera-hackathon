@@ -23,6 +23,7 @@ type jsonWebToken struct {
 type Claims struct {
 	UserID        uuid.UUID `json:"user_id"`
 	CooperativeID uuid.UUID `json:"cooperative_id"`
+	SessionID     uuid.UUID `json:"session_id"`
 	RoleCode      string    `json:"role_code"`
 	jwt.RegisteredClaims
 }
@@ -30,6 +31,7 @@ type Claims struct {
 type GenerateAccessTokenInput struct {
 	UserID        uuid.UUID
 	CooperativeID uuid.UUID
+	SessionID     uuid.UUID
 	RoleCode      string
 }
 
@@ -52,6 +54,7 @@ func (j *jsonWebToken) GenerateAccessToken(input GenerateAccessTokenInput) (stri
 	claims := Claims{
 		UserID:        input.UserID,
 		CooperativeID: input.CooperativeID,
+		SessionID:     input.SessionID,
 		RoleCode:      input.RoleCode,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),

@@ -33,6 +33,30 @@ func (r *Rest) GetFinancialReport(c *gin.Context) {
 	response.Success(c, http.StatusOK, "success to get financial report", result)
 }
 
+func (r *Rest) GetCooperativeHealthScore(c *gin.Context) {
+	authContext, ok := getAuthContext(c)
+	if !ok {
+		return
+	}
+
+	var req model.CooperativeHealthScoreRequest
+	err := c.ShouldBindQuery(&req)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to bind query", err)
+		return
+	}
+
+	req.AuthContext = authContext
+
+	result, err := r.service.ReportService.GetCooperativeHealthScore(req)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "success to get cooperative health score", result)
+}
+
 func (r *Rest) ExportFinancialReportXLSX(c *gin.Context) {
 	authContext, ok := getAuthContext(c)
 	if !ok {
@@ -62,4 +86,27 @@ func (r *Rest) ExportFinancialReportXLSX(c *gin.Context) {
 		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 		fileBytes,
 	)
+}
+
+func (r *Rest) GetDashboardSummary(c *gin.Context) {
+	authContext, ok := getAuthContext(c)
+	if !ok {
+		return
+	}
+
+	var req model.DashboardSummaryRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to bind query", err)
+		return
+	}
+
+	req.AuthContext = authContext
+
+	result, err := r.service.ReportService.GetDashboardSummary(req)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "success to get dashboard summary", result)
 }

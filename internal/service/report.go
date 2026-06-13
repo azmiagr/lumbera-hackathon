@@ -3,20 +3,25 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
+	"github.com/azmiagr/lumbera-hackathon/entity"
 	"github.com/azmiagr/lumbera-hackathon/internal/repository"
 	"github.com/azmiagr/lumbera-hackathon/model"
 	constants "github.com/azmiagr/lumbera-hackathon/pkg/constant"
 	appErrors "github.com/azmiagr/lumbera-hackathon/pkg/errors"
 	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
+	"gorm.io/gorm"
 )
 
 type IReportService interface {
 	GetFinancialReport(req model.FinancialReportRequest) (*model.FinancialReportResponse, error)
 	ExportFinancialReportXLSX(req model.FinancialReportRequest) ([]byte, string, error)
+	GetCooperativeHealthScore(req model.CooperativeHealthScoreRequest) (*model.CooperativeHealthScoreResponse, error)
+	GetDashboardSummary(req model.DashboardSummaryRequest) (*model.DashboardSummaryResponse, error)
 }
 
 type ReportService struct {
@@ -126,6 +131,600 @@ func (s *ReportService) ExportFinancialReportXLSX(req model.FinancialReportReque
 	fileName := fmt.Sprintf("laporan-keuangan-%s.xlsx", period)
 
 	return buffer.Bytes(), fileName, nil
+}
+
+func (s *ReportService) GetCooperativeHealthScore(req model.CooperativeHealthScoreRequest) (*model.CooperativeHealthScoreResponse, error) {
+	if err := validateReportAccess(req.AuthContext); err != nil {
+		return nil, err
+	}
+
+	periodEndMonth, err := parseReportPeriod(req.Period)
+	if err != nil {
+		return nil, err
+	}
+
+	periodKey := periodEndMonth.Format("2006-01")
+	periodStart, periodEnd := monthRange(periodKey)
+	previousStart := periodStart.AddDate(0, -1, 0)
+	previousEnd := periodStart.Add(-time.Nanosecond)
+
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	cumulativeStart := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	cumulativeRows, err := s.deps.repository.AccountingRepository.GetAccountBalances(tx, req.CooperativeID, cumulativeStart, periodEnd)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil saldo CHS")
+	}
+
+	monthlyRows, err := s.deps.repository.AccountingRepository.GetAccountBalances(tx, req.CooperativeID, periodStart, periodEnd)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil saldo CHS")
+	}
+
+	previousCumulativeRows, err := s.deps.repository.AccountingRepository.GetAccountBalances(tx, req.CooperativeID, cumulativeStart, previousEnd)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil saldo CHS")
+	}
+
+	financial, err := s.buildFinancialCHSDimension(tx, req.CooperativeID, periodEnd, cumulativeRows, monthlyRows, previousCumulativeRows)
+	if err != nil {
+		return nil, err
+	}
+
+	operational, err := s.buildOperationalCHSDimension(tx, req.CooperativeID, periodStart, periodEnd, previousStart, previousEnd, monthlyRows)
+	if err != nil {
+		return nil, err
+	}
+
+	dataQuality, err := s.buildDataQualityCHSDimension(tx, req.CooperativeID, periodStart, periodEnd)
+	if err != nil {
+		return nil, err
+	}
+
+	compliance := buildComplianceCHSDimension()
+
+	err = tx.Commit().Error
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menghitung CHS")
+	}
+
+	dimensions := []model.CHSDimensionScore{financial, operational, dataQuality, compliance}
+	chsScore, status := calculateCHSTotal(dimensions)
+	displayScore := int(math.Round(chsScore))
+	grade, category := determineCHSGrade(chsScore)
+	if status == "INSUFFICIENT_DATA" {
+		grade = ""
+		category = "Data Tidak Cukup"
+		displayScore = 0
+	}
+
+	return &model.CooperativeHealthScoreResponse{
+		Period:       periodKey,
+		Status:       status,
+		CHSScore:     round2(chsScore),
+		DisplayScore: displayScore,
+		Grade:        grade,
+		Category:     category,
+		Dimensions:   dimensions,
+	}, nil
+}
+
+func (s *ReportService) GetDashboardSummary(req model.DashboardSummaryRequest) (*model.DashboardSummaryResponse, error) {
+	if err := validateReportAccess(req.AuthContext); err != nil {
+		return nil, err
+	}
+
+	periodEnd, err := parseReportPeriod(req.Period)
+	if err != nil {
+		return nil, err
+	}
+
+	period := periodEnd.Format("2006-01")
+
+	chs, err := s.GetCooperativeHealthScore(model.CooperativeHealthScoreRequest{
+		AuthContext: req.AuthContext,
+		Period:      period,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	tx := s.deps.db.Begin()
+	defer tx.Rollback()
+
+	activeMembers, err := s.deps.repository.MemberRepository.CountActiveMembersByCooperative(tx, req.CooperativeID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menghitung anggota aktif")
+	}
+
+	registeredMembers, err := s.deps.repository.MemberRepository.CountMembersByCooperative(tx, req.CooperativeID)
+	if err != nil {
+		return nil, appErrors.InternalServer("gagal menghitung anggota terdaftar")
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, appErrors.InternalServer("gagal mengambil ringkasan dashboard")
+	}
+
+	return &model.DashboardSummaryResponse{
+		Period:      period,
+		PeriodLabel: formatIndonesianMonth(periodEnd),
+		CHS: model.DashboardCHSSummary{
+			Score:        chs.CHSScore,
+			DisplayScore: chs.DisplayScore,
+			Grade:        chs.Grade,
+			Category:     chs.Category,
+			Status:       chs.Status,
+		},
+		Members: model.DashboardMemberSummary{
+			Active:     activeMembers,
+			Registered: registeredMembers,
+		},
+	}, nil
+}
+
+func (s *ReportService) buildFinancialCHSDimension(tx *gorm.DB, cooperativeID uuid.UUID, periodEnd time.Time, cumulativeRows, monthlyRows, previousCumulativeRows []repository.AccountBalanceRow) (model.CHSDimensionScore, error) {
+	loanRisk, err := s.deps.repository.CHSRepository.GetLoanRiskMetrics(tx, cooperativeID, periodEnd)
+	if err != nil {
+		return model.CHSDimensionScore{}, appErrors.InternalServer("gagal menghitung NPL")
+	}
+
+	indicators := []model.CHSIndicatorScore{
+		unavailableCHSIndicator("NPL", "Non-Performing Loan Rate", 0.40, "belum ada pinjaman aktif"),
+		unavailableCHSIndicator("CAR", "Rasio Kecukupan Modal", 0.25, "data aset/modal belum tersedia"),
+		unavailableCHSIndicator("ROA", "Return on Assets", 0.20, "data laba/aset belum tersedia"),
+		unavailableCHSIndicator("LIQUIDITY", "Likuiditas", 0.15, "data aset/kewajiban belum tersedia"),
+	}
+
+	if loanRisk.TotalRemainingPrincipal > 0 {
+		nplRate := percent(loanRisk.BadRemainingPrincipal, loanRisk.TotalRemainingPrincipal)
+		indicators[0] = availableCHSIndicator("NPL", "Non-Performing Loan Rate", nplRate, scoreNPL(nplRate), 0.40)
+	}
+
+	totalAssets := sumBalancesByAccountType(cumulativeRows, constants.AccountTypeAsset)
+	totalEquity := sumBalancesByAccountType(cumulativeRows, constants.AccountTypeEquity)
+	if totalAssets > 0 {
+		car := percent(totalEquity, totalAssets)
+		indicators[1] = availableCHSIndicator("CAR", "Rasio Kecukupan Modal", car, scoreCapitalAdequacy(car), 0.25)
+	}
+
+	periodNetIncome := sumBalancesByAccountType(monthlyRows, constants.AccountTypeRevenue) - sumBalancesByAccountType(monthlyRows, constants.AccountTypeExpense)
+	assetStart := sumBalancesByAccountType(previousCumulativeRows, constants.AccountTypeAsset)
+	assetEnd := totalAssets
+	averageAssets := float64(assetStart+assetEnd) / 2
+	if averageAssets > 0 {
+		roa := (float64(periodNetIncome) / averageAssets) * 100
+		indicators[2] = availableCHSIndicator("ROA", "Return on Assets", roa, scoreROA(roa), 0.20)
+	}
+
+	totalLiabilities := sumBalancesByAccountType(cumulativeRows, constants.AccountTypeLiability)
+	if totalLiabilities > 0 {
+		currentRatio := float64(totalAssets) / float64(totalLiabilities)
+		indicators[3] = availableCHSIndicator("LIQUIDITY", "Likuiditas", currentRatio, scoreLiquidity(currentRatio), 0.15)
+	}
+
+	return buildCHSDimension("FINANCIAL", "Keuangan", 0.35, indicators), nil
+}
+
+func (s *ReportService) buildOperationalCHSDimension(tx *gorm.DB, cooperativeID uuid.UUID, periodStart, periodEnd, previousStart, previousEnd time.Time, monthlyRows []repository.AccountBalanceRow) (model.CHSDimensionScore, error) {
+	indicators := []model.CHSIndicatorScore{
+		unavailableCHSIndicator("ON_TIME_PAYMENT", "Pembayaran Tepat Waktu", 0.35, "belum ada jadwal angsuran jatuh tempo"),
+		unavailableCHSIndicator("ACTIVE_MEMBER", "Keaktifan Anggota", 0.25, "belum ada anggota aktif"),
+		unavailableCHSIndicator("TRANSACTION_GROWTH", "Pertumbuhan Transaksi", 0.20, "belum ada transaksi periode pembanding"),
+		unavailableCHSIndicator("OPERATIONAL_EFFICIENCY", "Efisiensi Operasional", 0.20, "data pendapatan/biaya belum tersedia"),
+	}
+
+	payment, err := s.deps.repository.CHSRepository.GetOnTimePaymentMetrics(tx, cooperativeID, periodStart, periodEnd)
+	if err != nil {
+		return model.CHSDimensionScore{}, appErrors.InternalServer("gagal menghitung pembayaran tepat waktu")
+	}
+	if payment.TotalDue > 0 {
+		onTimeRate := percent(payment.OnTime, payment.TotalDue)
+		indicators[0] = availableCHSIndicator("ON_TIME_PAYMENT", "Pembayaran Tepat Waktu", onTimeRate, scoreOnTimePayment(onTimeRate), 0.35)
+	}
+
+	memberActivity, err := s.deps.repository.CHSRepository.GetMemberActivityMetrics(tx, cooperativeID, periodStart, periodEnd)
+	if err != nil {
+		return model.CHSDimensionScore{}, appErrors.InternalServer("gagal menghitung keaktifan anggota")
+	}
+	if memberActivity.TotalMembers > 0 {
+		activeRate := percent(memberActivity.ActiveMembers, memberActivity.TotalMembers)
+		indicators[1] = availableCHSIndicator("ACTIVE_MEMBER", "Keaktifan Anggota", activeRate, scoreActiveMember(activeRate), 0.25)
+	}
+
+	growth, err := s.deps.repository.CHSRepository.GetTransactionGrowthMetrics(tx, cooperativeID, periodStart, periodEnd, previousStart, previousEnd)
+	if err != nil {
+		return model.CHSDimensionScore{}, appErrors.InternalServer("gagal menghitung pertumbuhan transaksi")
+	}
+	if growth.PreviousTransactions > 0 {
+		growthRate := (float64(growth.CurrentTransactions-growth.PreviousTransactions) / float64(growth.PreviousTransactions)) * 100
+		indicators[2] = availableCHSIndicator("TRANSACTION_GROWTH", "Pertumbuhan Transaksi", growthRate, scoreTransactionGrowth(growthRate), 0.20)
+	} else if growth.CurrentTransactions > 0 {
+		indicators[2] = availableCHSIndicator("TRANSACTION_GROWTH", "Pertumbuhan Transaksi", 100, 100, 0.20)
+	}
+
+	revenue := sumBalancesByAccountType(monthlyRows, constants.AccountTypeRevenue)
+	expense := sumBalancesByAccountType(monthlyRows, constants.AccountTypeExpense)
+	if revenue > 0 {
+		expenseRatio := percent(expense, revenue)
+		indicators[3] = availableCHSIndicator("OPERATIONAL_EFFICIENCY", "Efisiensi Operasional", expenseRatio, scoreOperationalEfficiency(expenseRatio), 0.20)
+	}
+
+	return buildCHSDimension("OPERATIONAL", "Operasional", 0.25, indicators), nil
+}
+
+func (s *ReportService) buildDataQualityCHSDimension(tx *gorm.DB, cooperativeID uuid.UUID, periodStart, periodEnd time.Time) (model.CHSDimensionScore, error) {
+	indicators := []model.CHSIndicatorScore{
+		unavailableCHSIndicator("COMPLETENESS", "Kelengkapan Data", 0.35, "belum ada data anggota"),
+		unavailableCHSIndicator("SYNC_TIMELINESS", "Ketepatan Sinkronisasi", 0.25, "belum ada transaksi pada periode"),
+		unavailableCHSIndicator("CONSISTENCY", "Konsistensi Data", 0.25, "belum ada record yang diperiksa"),
+		unavailableCHSIndicator("LEDGER_VALIDITY", "Validitas Ledger", 0.15, "belum ada transaksi ledger"),
+	}
+
+	completeness, err := s.deps.repository.CHSRepository.GetDataCompletenessMetrics(tx, cooperativeID)
+	if err != nil {
+		return model.CHSDimensionScore{}, appErrors.InternalServer("gagal menghitung kelengkapan data")
+	}
+	if completeness.TotalFields > 0 {
+		completenessRate := percent(completeness.FilledFields, completeness.TotalFields)
+		indicators[0] = availableCHSIndicator("COMPLETENESS", "Kelengkapan Data", completenessRate, scoreCompleteness(completenessRate), 0.35)
+	}
+
+	syncMetrics, err := s.deps.repository.CHSRepository.GetSyncTimelinessMetrics(tx, cooperativeID, periodStart, periodEnd)
+	if err != nil {
+		return model.CHSDimensionScore{}, appErrors.InternalServer("gagal menghitung sinkronisasi")
+	}
+	if syncMetrics.TotalTransactions > 0 {
+		syncRate := percent(syncMetrics.TimelyTransactions, syncMetrics.TotalTransactions)
+		indicators[1] = availableCHSIndicator("SYNC_TIMELINESS", "Ketepatan Sinkronisasi", syncRate, scoreSyncTimeliness(syncRate), 0.25)
+	}
+
+	consistency, err := s.deps.repository.CHSRepository.GetConsistencyMetrics(tx, cooperativeID, periodStart, periodEnd)
+	if err != nil {
+		return model.CHSDimensionScore{}, appErrors.InternalServer("gagal menghitung konsistensi data")
+	}
+	if consistency.TotalRecords > 0 {
+		consistencyRate := percent(consistency.ConsistentRecords, consistency.TotalRecords)
+		indicators[2] = availableCHSIndicator("CONSISTENCY", "Konsistensi Data", consistencyRate, scoreConsistency(consistencyRate), 0.25)
+	}
+
+	ledgerTransactions, err := s.deps.repository.CHSRepository.ListLedgerTransactions(tx, cooperativeID, periodEnd)
+	if err != nil {
+		return model.CHSDimensionScore{}, appErrors.InternalServer("gagal memverifikasi ledger")
+	}
+	if len(ledgerTransactions) > 0 {
+		ledgerRate := calculateLedgerVerificationRate(ledgerTransactions)
+		indicators[3] = availableCHSIndicator("LEDGER_VALIDITY", "Validitas Ledger", ledgerRate, scoreLedgerValidity(ledgerRate), 0.15)
+	}
+
+	return buildCHSDimension("DATA_QUALITY", "Kualitas Data", 0.20, indicators), nil
+}
+
+func buildComplianceCHSDimension() model.CHSDimensionScore {
+	return buildCHSDimension("COMPLIANCE", "Kepatuhan", 0.20, []model.CHSIndicatorScore{
+		unavailableCHSIndicator("ON_TIME_REPORTING", "Ketepatan Laporan Berkala", 0.35, "histori submit laporan belum tersedia"),
+		unavailableCHSIndicator("DOCUMENT_COMPLETENESS", "Kelengkapan Dokumen Wajib", 0.25, "dokumen wajib belum tersedia"),
+		unavailableCHSIndicator("RAT", "Pelaksanaan RAT", 0.20, "data RAT belum tersedia"),
+		unavailableCHSIndicator("AUDIT_CONSENT", "Audit Trail dan Consent", 0.20, "audit log dan consent belum tersedia"),
+	})
+}
+
+func availableCHSIndicator(code, label string, rawValue, score, weight float64) model.CHSIndicatorScore {
+	raw := round2(rawValue)
+	normalizedScore := round2(score)
+
+	return model.CHSIndicatorScore{
+		Code:          code,
+		Label:         label,
+		RawValue:      &raw,
+		Score:         &normalizedScore,
+		Weight:        weight,
+		WeightedScore: round2(normalizedScore * weight),
+		Status:        "AVAILABLE",
+	}
+}
+
+func unavailableCHSIndicator(code, label string, weight float64, message string) model.CHSIndicatorScore {
+	return model.CHSIndicatorScore{
+		Code:    code,
+		Label:   label,
+		Weight:  weight,
+		Status:  "UNAVAILABLE",
+		Message: message,
+	}
+}
+
+func buildCHSDimension(code, label string, weight float64, indicators []model.CHSIndicatorScore) model.CHSDimensionScore {
+	var availableWeight float64
+	var weightedScore float64
+	availableCount := 0
+
+	for _, indicator := range indicators {
+		if indicator.Score == nil {
+			continue
+		}
+
+		availableWeight += indicator.Weight
+		weightedScore += (*indicator.Score) * indicator.Weight
+		availableCount++
+	}
+
+	status := "UNAVAILABLE"
+	score := 0.0
+	if availableCount > 0 {
+		score = weightedScore / availableWeight
+		status = "PARTIAL"
+		if availableCount == len(indicators) {
+			status = "COMPLETE"
+		}
+	}
+
+	return model.CHSDimensionScore{
+		Code:       code,
+		Label:      label,
+		Weight:     weight,
+		Score:      round2(score),
+		Status:     status,
+		Indicators: indicators,
+	}
+}
+
+func calculateCHSTotal(dimensions []model.CHSDimensionScore) (float64, string) {
+	var availableWeight float64
+	var weightedScore float64
+	availableCount := 0
+	completeCount := 0
+
+	for _, dimension := range dimensions {
+		if dimension.Status == "UNAVAILABLE" {
+			continue
+		}
+
+		availableWeight += dimension.Weight
+		weightedScore += dimension.Score * dimension.Weight
+		availableCount++
+		if dimension.Status == "COMPLETE" {
+			completeCount++
+		}
+	}
+
+	if availableCount == 0 || availableWeight == 0 {
+		return 0, "INSUFFICIENT_DATA"
+	}
+
+	status := "PARTIAL"
+	if completeCount == len(dimensions) {
+		status = "COMPLETE"
+	}
+
+	return weightedScore / availableWeight, status
+}
+
+func determineCHSGrade(score float64) (string, string) {
+	switch {
+	case score >= 85:
+		return "AA", "Sangat Sehat"
+	case score >= 75:
+		return "A", "Sehat"
+	case score >= 65:
+		return "B", "Cukup Sehat"
+	case score >= 50:
+		return "C", "Kurang Sehat"
+	default:
+		return "D", "Tidak Sehat"
+	}
+}
+
+func percent(numerator int64, denominator int64) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+
+	return (float64(numerator) / float64(denominator)) * 100
+}
+
+func round2(value float64) float64 {
+	return math.Round(value*100) / 100
+}
+
+func sumBalancesByAccountType(rows []repository.AccountBalanceRow, accountType string) int64 {
+	var total int64
+	for _, row := range rows {
+		if row.AccountType == accountType {
+			total += accountBalance(row)
+		}
+	}
+
+	return total
+}
+
+func calculateLedgerVerificationRate(transactions []entity.Transaction) float64 {
+	if len(transactions) == 0 {
+		return 0
+	}
+
+	validRecords := 0
+	expectedPrevHash := genesisTransactionHash
+	for _, transaction := range transactions {
+		if transaction.PrevHash == expectedPrevHash && transaction.CurrentHash == buildTransactionHash(&transaction) {
+			validRecords++
+		}
+		expectedPrevHash = transaction.CurrentHash
+	}
+
+	return percent(int64(validRecords), int64(len(transactions)))
+}
+
+func scoreNPL(value float64) float64 {
+	switch {
+	case value <= 2:
+		return 100
+	case value <= 5:
+		return 85
+	case value <= 8:
+		return 65
+	case value <= 12:
+		return 40
+	default:
+		return 20
+	}
+}
+
+func scoreCapitalAdequacy(value float64) float64 {
+	switch {
+	case value >= 20:
+		return 100
+	case value >= 15:
+		return 85
+	case value >= 10:
+		return 70
+	case value >= 5:
+		return 45
+	default:
+		return 20
+	}
+}
+
+func scoreROA(value float64) float64 {
+	switch {
+	case value >= 5:
+		return 100
+	case value >= 3:
+		return 85
+	case value >= 1:
+		return 70
+	case value >= 0:
+		return 50
+	default:
+		return 20
+	}
+}
+
+func scoreLiquidity(value float64) float64 {
+	switch {
+	case value >= 1.5 && value <= 2.5:
+		return 100
+	case value > 2.5 && value <= 3:
+		return 90
+	case value > 3:
+		return 75
+	case value >= 1.2:
+		return 85
+	case value >= 1:
+		return 70
+	case value >= 0.8:
+		return 45
+	default:
+		return 20
+	}
+}
+
+func scoreOnTimePayment(value float64) float64 {
+	switch {
+	case value >= 95:
+		return 100
+	case value >= 90:
+		return 85
+	case value >= 80:
+		return 70
+	case value >= 70:
+		return 50
+	default:
+		return 25
+	}
+}
+
+func scoreActiveMember(value float64) float64 {
+	switch {
+	case value >= 80:
+		return 100
+	case value >= 65:
+		return 85
+	case value >= 50:
+		return 70
+	case value >= 35:
+		return 50
+	default:
+		return 25
+	}
+}
+
+func scoreTransactionGrowth(value float64) float64 {
+	switch {
+	case value >= 15:
+		return 100
+	case value >= 5:
+		return 85
+	case value >= 0:
+		return 70
+	case value >= -10:
+		return 50
+	default:
+		return 25
+	}
+}
+
+func scoreOperationalEfficiency(value float64) float64 {
+	switch {
+	case value <= 60:
+		return 100
+	case value <= 75:
+		return 85
+	case value <= 90:
+		return 70
+	case value <= 100:
+		return 50
+	default:
+		return 25
+	}
+}
+
+func scoreCompleteness(value float64) float64 {
+	switch {
+	case value >= 98:
+		return 100
+	case value >= 95:
+		return 85
+	case value >= 90:
+		return 70
+	case value >= 80:
+		return 50
+	default:
+		return 25
+	}
+}
+
+func scoreSyncTimeliness(value float64) float64 {
+	return scoreCompleteness(value)
+}
+
+func scoreConsistency(value float64) float64 {
+	switch {
+	case value >= 99:
+		return 100
+	case value >= 97:
+		return 85
+	case value >= 94:
+		return 70
+	case value >= 90:
+		return 50
+	default:
+		return 25
+	}
+}
+
+func scoreLedgerValidity(value float64) float64 {
+	switch {
+	case value == 100:
+		return 100
+	case value >= 99.9:
+		return 85
+	case value >= 99:
+		return 60
+	default:
+		return 20
+	}
 }
 
 func validateReportAccess(auth model.AuthContext) error {
