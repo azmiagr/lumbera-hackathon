@@ -239,9 +239,7 @@ go test ./...
 
 Untuk manual API testing, gunakan dokumentasi Postman:
 
-```text
-https://documenter.getpostman.com/view/33317073/2sBXwsMVk4
-```
+[![Open Postman Documentation](https://img.shields.io/badge/Open-Postman%20Documentation-FF6C37?style=for-the-badge&logo=postman&logoColor=white)](https://documenter.getpostman.com/view/33317073/2sBXwsMVk4)
 
 Flow umum testing:
 
