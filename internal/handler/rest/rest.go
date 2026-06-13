@@ -88,6 +88,14 @@ func (r *Rest) MountEndpoint() {
 	store.POST("/sales", r.CreateStoreSale)
 	store.GET("/sales/:saleID", r.GetStoreSale)
 
+	sync := baseURL.Group("/sync")
+	sync.Use(r.middleware.AuthenticateUser())
+	sync.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
+	sync.POST("/push", r.PushSync)
+	sync.GET("/config", r.GetSyncConfig)
+	sync.GET("/bootstrap", r.GetSyncBootstrap)
+	sync.GET("/status", r.GetSyncStatus)
+
 	ledger := baseURL.Group("/ledger")
 	ledger.Use(r.middleware.AuthenticateUser())
 	ledger.Use(r.middleware.RequireRole(constants.RoleCodePengurusKoperasi))
