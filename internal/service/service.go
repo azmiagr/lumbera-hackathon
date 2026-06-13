@@ -26,6 +26,7 @@ type Service struct {
 	CreditAccessService        ICreditAccessService
 	StoreService               IStoreService
 	LedgerService              ILedgerService
+	SyncService                ISyncService
 }
 
 type serviceDependency struct {
@@ -64,5 +65,6 @@ func NewService(repository *repository.Repository, bcrypt bcrypt.Interface, jwtA
 		CreditAccessService:        NewCreditAccessService(deps),
 		StoreService:               NewStoreService(deps),
 		LedgerService:              NewLedgerService(deps),
+		SyncService:                NewSyncService(deps),
 	}
 }

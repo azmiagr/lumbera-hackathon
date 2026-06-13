@@ -97,7 +97,7 @@ func (s *TransactionService) CreateSavingsTransaction(req model.CreateSavingsTra
 	if clientTransactionID != "" {
 		existingTransaction, err := s.deps.repository.TransactionRepository.GetTransactionByClientID(tx, req.CooperativeID, clientTransactionID)
 		if err == nil {
-			if existingTransaction.TransactionType != constants.TransactionTypeCashWithdrawal {
+			if !isSavingsTransactionType(existingTransaction.TransactionType) {
 				return nil, appErrors.BadRequest("client_transaction_id sudah digunakan untuk transaksi lain")
 			}
 
@@ -567,9 +567,7 @@ func (s *TransactionService) CreateCashWithdrawalTransaction(req model.CreateCas
 	if clientTransactionID != "" {
 		existingTransaction, err := s.deps.repository.TransactionRepository.GetTransactionByClientID(tx, req.CooperativeID, clientTransactionID)
 		if err == nil {
-			if existingTransaction.TransactionType != constants.TransactionTypeSavingsPrincipal &&
-				existingTransaction.TransactionType != constants.TransactionTypeSavingsMandatory &&
-				existingTransaction.TransactionType != constants.TransactionTypeSavingsVoluntary {
+			if existingTransaction.TransactionType != constants.TransactionTypeCashWithdrawal {
 				return nil, appErrors.BadRequest("client_transaction_id sudah digunakan untuk transaksi lain")
 			}
 
@@ -1224,6 +1222,12 @@ func enrichTransactionListItem(item *model.TransactionListItemResponse) {
 	item.TransactionTypeLabel = getTransactionTypeLabel(item.TransactionType)
 	item.HashPreview = buildHashPreview(item.CurrentHash)
 	item.SyncStatus = constants.SyncStatusSynced
+}
+
+func isSavingsTransactionType(transactionType string) bool {
+	return transactionType == constants.TransactionTypeSavingsPrincipal ||
+		transactionType == constants.TransactionTypeSavingsMandatory ||
+		transactionType == constants.TransactionTypeSavingsVoluntary
 }
 
 func getTransactionGroup(transactionType string) string {
